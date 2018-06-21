@@ -47,10 +47,9 @@ class PathFollowingLTV_MPC:
         Arguments:
             x0: current state position
         """
-
         startTimer = datetime.datetime.now()
         self.A, self.B, self. C = _EstimateABC(self)
-        self.G, self.E, self.L = _buildMatEqConst(self)
+        self.G, self.E, self.L = _buildMatEqConst(self) #new dynamics constraints
         endTimer = datetime.datetime.now(); deltaTimer = endTimer - startTimer
         self.linearizationTime = deltaTimer
 

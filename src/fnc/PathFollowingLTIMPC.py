@@ -13,7 +13,7 @@ class PathFollowingLTI_MPC:
     """
     def __init__(self, A, B, Q, R, N, vt):
         """Initialization
-        A, B: Liner Time Invariant (LTI) system dynamics
+        A, B: Linear Time Invariant (LTI) system dynamics
         Q, R: weights to build the cost function h(x,u) = ||x||_Q + ||u||_R
         N: horizon length
         vt: target velocity
@@ -29,7 +29,7 @@ class PathFollowingLTI_MPC:
         startTimer = datetime.datetime.now()
         endTimer = datetime.datetime.now(); deltaTimer = endTimer - startTimer
         self.solverTime = deltaTimer
-        self.linearizationTime = deltaTimer
+        self.linearizationTime = deltaTimer #this is just the weirdest thing but oh well
 
         self.M, self.q = _buildMatCost(self)
         self.F, self.b = _buildMatIneqConst(self)
@@ -48,7 +48,7 @@ class PathFollowingLTI_MPC:
         startTimer = datetime.datetime.now()
         sol = qp(M, matrix(q), F, matrix(b), G, E * matrix(x0))
         endTimer = datetime.datetime.now(); deltaTimer = endTimer - startTimer
-        self.solverTime = deltaTimer
+        self.solverTime = deltaTimer #this timer puts out the solver time, makes sense
         if sol['status'] == 'optimal':
             self.feasible = 1
         else:
@@ -99,7 +99,7 @@ def _buildMatEqConst(Controller):
 def _buildMatIneqConst(Controller):
     N = Controller.N
     n = Controller.n
-    # Buil the matrices for the state constraint in each region. In the region i we want Fx[i]x <= bx[b]
+    # Build the matrices for the state constraint in each region. In the region i we want Fx[i]x <= bx[i]
     Fx = np.array([[1., 0., 0., 0., 0., 0.],
                    [0., 0., 0., 0., 0., 1.],
                    [0., 0., 0., 0., 0., -1.]])
@@ -108,7 +108,7 @@ def _buildMatIneqConst(Controller):
                    [2.],  # max ey
                    [2.]])  # max ey
 
-    # Buil the matrices for the input constraint in each region. In the region i we want Fx[i]x <= bx[b]
+    # Buil dthe matrices for the input constraint in each region. In the region i we want Fx[i]x <= bx[i]
     Fu = np.array([[1., 0.],
                    [-1., 0.],
                    [0., 1.],

@@ -12,7 +12,7 @@ class Simulator():
         """Initialization
         map: map
         lap: number of laps to run. If set to 0 then the simulation is completed when ClosedLoopData is full
-        flagLMPC: set to 0 for standart controller. Set to 1 for LMPC --> at iteration j add data to SS^{j-1} (look line 9999)
+        flagLMPC: set to 0 for standard controller. Set to 1 for LMPC --> at iteration j add data to SS^{j-1} (look line 9999)
         """
         self.map = map
         self.laps = lap
@@ -26,15 +26,15 @@ class Simulator():
         """
 
         # Assign x = ClosedLoopData.x. IMPORTANT: x and ClosedLoopData.x share the same memory and therefore
-        # if you modofy one is like modifying the other one!
-        x      = ClosedLoopData.x
+        # if you modify one is like modifying the other one!
+        x      = ClosedLoopData.x #empty vectors at initialization
         x_glob = ClosedLoopData.x_glob
         u      = ClosedLoopData.u
 
         SimulationTime = 0
         for i in range(0, ClosedLoopData.Points):
 
-            Controller.solve(x[i, :])
+            Controller.solve(x[i, :]) #calculates optimal input [del, a] given state x
 
             u[i, :] = Controller.uPred[0,:]
 
@@ -44,12 +44,13 @@ class Simulator():
                 LMPCprediction.SSused[:, :, i, Controller.it]          = Controller.SS_PointSelectedTot
                 LMPCprediction.Qfunused[:, i, Controller.it]           = Controller.Qfun_SelectedTot
 
+            # forward dynamics (global and in error frame), with small noises added    
             x[i + 1, :], x_glob[i + 1, :] = _DynModel(x[i, :], x_glob[i, :], u[i, :], np, ClosedLoopData.dt, self.map.PointAndTangent)
             SimulationTime = i + 1
 
-            if i <= 5:
-                print("Linearization time: %.4fs Solver time: %.4fs" % (Controller.linearizationTime.total_seconds(), Controller.solverTime.total_seconds()))
-                print("Time: ", i * ClosedLoopData.dt, "Current State and Input: ", x[i, :], u[i, :])
+            # if i <= 5:
+            #     print("Linearization time: %.4fs Solver time: %.4fs" % (Controller.linearizationTime.total_seconds(), Controller.solverTime.total_seconds()))
+            #     print("Time: ", i * ClosedLoopData.dt, "Current State and Input: ", x[i, :], u[i, :])
 
             if Controller.feasible == 0:
                 print("Unfeasible at time ", i*ClosedLoopData.dt)
@@ -80,8 +81,9 @@ class PID:
         self.uPred = np.zeros([1,2])
 
         startTimer = datetime.datetime.now()
-        endTimer = datetime.datetime.now(); deltaTimer = endTimer - startTimer
-        self.solverTime = deltaTimer
+        endTimer = datetime.datetime.now()
+        deltaTimer = endTimer - startTimer
+        self.solverTime = deltaTimer #time between two consecutive lines?
         self.linearizationTime = deltaTimer
         self.feasible = 1
 

@@ -42,10 +42,10 @@ import pickle
 # ======================================================================================================================
 # ============================ Choose which controller to run ==========================================================
 # ======================================================================================================================
-RunPID     = 0; plotFlag       = 0
-RunMPC     = 0; plotFlagMPC    = 0
-RunMPC_tv  = 0; plotFlagMPC_tv = 0
-RunLMPC    = 1; plotFlagLMPC   = 0; animation_xyFlag = 1; animation_stateFlag = 0
+RunPID     = 1; plotFlag       = 1
+RunMPC     = 1; plotFlagMPC    = 1
+RunMPC_tv  = 1; plotFlagMPC_tv = 1
+RunLMPC    = 1; plotFlagLMPC   = 1; animation_xyFlag = 1; animation_stateFlag = 0
 runPWAFlag = 0; # uncomment importing pwa_cluster in LMPC.py
 testCoordChangeFlag = 0;
 plotOneStepPredictionErrors = 1;
@@ -54,7 +54,7 @@ plotOneStepPredictionErrors = 1;
 # ============================ Initialize parameters for path following ================================================
 # ======================================================================================================================
 dt         = 1.0/10.0        # Controller discretization time
-Time       = 100             # Simulation time for PID
+Time       = 100             # Simulation time for path following PID
 TimeMPC    = 100             # Simulation time for path following MPC
 TimeMPC_tv = 100             # Simulation time for path following LTV-MPC
 vt         = 0.8             # Reference velocity for path following controllers
@@ -66,7 +66,7 @@ n = 6;   d = 2               # State and Input dimension
 Q = np.diag([1.0, 1.0, 1, 1, 0.0, 100.0]) # vx, vy, wz, epsi, s, ey
 R = np.diag([1.0, 10.0])                  # delta, a
 
-map = Map(0.8)                            # Initialize the map
+map = Map(0.8)                            # Initialize the map (PointAndTangent); argument is track width
 simulator = Simulator(map)                # Initialize the Simulator
 
 # ======================================================================================================================
@@ -76,7 +76,7 @@ TimeLMPC   = 400              # Simulation time
 Laps       = 5+2              # Total LMPC laps
 
 # Safe Set Parameter
-LMPC_Solver = "OSQP"           # Can pick CVX for cvxopt or OSQP. For OSQP uncomment line 14 in LMPC.py
+LMPC_Solver = "CVX"           # Can pick CVX for cvxopt or OSQP. For OSQP uncomment line 14 in LMPC.py
 numSS_it = 2                  # Number of trajectories used at each iteration to build the safe set
 numSS_Points = 32 + N         # Number of points to select from each trajectory to build the safe set
 shift = 0                     # Given the closed point, x_t^j, to the x(t) select the SS points from x_{t+shift}^j
@@ -88,16 +88,16 @@ R_LMPC  =  1 * np.diag([1.0, 1.0])                      # Input cost u = [delta,
 dR_LMPC =  5 * np.array([1.0, 1.0])                     # Input rate cost u
 
 # Initialize LMPC simulator
-LMPCSimulator = Simulator(map, 1, 1)
+LMPCSimulator = Simulator(map, 1, 1) #flags indicate one lap, and using the LMPC controller
 
 # ======================================================================================================================
 # ======================================= PID path following ===========================================================
 # ======================================================================================================================
 print("Starting PID")
 if RunPID == 1:
-    ClosedLoopDataPID = ClosedLoopData(dt, Time , v0)
-    PIDController = PID(vt)
-    simulator.Sim(ClosedLoopDataPID, PIDController)
+    ClosedLoopDataPID = ClosedLoopData(dt, Time , v0) #form matrices for experiment data
+    PIDController = PID(vt) #sets the reference velocity and some timers?
+    simulator.Sim(ClosedLoopDataPID, PIDController) #simulates the PID controller for Time timesteps
 
     file_data = open(sys.path[0]+'/data/ClosedLoopDataPID.obj', 'wb')
     pickle.dump(ClosedLoopDataPID, file_data)
@@ -107,16 +107,20 @@ else:
     ClosedLoopDataPID = pickle.load(file_data)
     file_data.close()
 print("===== PID terminated")
-
+if plotFlag == 1:
+    plotTrajectory(map, ClosedLoopDataPID.x, ClosedLoopDataPID.x_glob, ClosedLoopDataPID.u)
+    plt.show()
 # ======================================================================================================================
 # ======================================  LINEAR REGRESSION ============================================================
 # ======================================================================================================================
-print("Starting MPC")
+raw_input("Finished PID - Start TI-MPC?")
+print("Starting TI-MPC")
 lamb = 0.0000001
+#fit linear dynamics to the closed loop data: x2 = A*x1 + b*u1; lamb is weight on frob norm of W
 A, B, Error = Regression(ClosedLoopDataPID.x, ClosedLoopDataPID.u, lamb)
 
 if RunMPC == 1:
-    ClosedLoopDataLTI_MPC = ClosedLoopData(dt, TimeMPC, v0)
+    ClosedLoopDataLTI_MPC = ClosedLoopData(dt, TimeMPC, v0) #form (empty) matrices for experiment data
     Controller_PathFollowingLTI_MPC = PathFollowingLTI_MPC(A, B, Q, R, N, vt)
     simulator.Sim(ClosedLoopDataLTI_MPC, Controller_PathFollowingLTI_MPC)
 
@@ -127,11 +131,14 @@ else:
     file_data = open(sys.path[0]+'/data/ClosedLoopDataLTI_MPC.obj', 'rb')
     ClosedLoopDataLTI_MPC = pickle.load(file_data)
     file_data.close()
-print("===== MPC terminated")
-
+print("===== TI-MPC terminated")
+if plotFlagMPC == 1:
+    plotTrajectory(map, ClosedLoopDataLTI_MPC.x, ClosedLoopDataLTI_MPC.x_glob, ClosedLoopDataLTI_MPC.u)
+    plt.show()
 # ======================================================================================================================
 # ===================================  LOCAL LINEAR REGRESSION =========================================================
 # ======================================================================================================================
+raw_input("Finished TI-MPC - Start TV-MPC?")
 print("Starting TV-MPC")
 if RunMPC_tv == 1:
     ClosedLoopDataLTV_MPC = ClosedLoopData(dt, TimeMPC_tv, v0)
@@ -146,18 +153,24 @@ else:
     ClosedLoopDataLTV_MPC = pickle.load(file_data)
     file_data.close()
 print("===== TV-MPC terminated")
+if plotFlagMPC_tv == 1:
+    plotTrajectory(map, ClosedLoopDataLTV_MPC.x, ClosedLoopDataLTV_MPC.x_glob, ClosedLoopDataLTV_MPC.u)
+    plt.show()
+
 # ======================================================================================================================
 # ==============================  LMPC w\ LOCAL LINEAR REGRESSION ======================================================
 # ======================================================================================================================
+raw_input("Finished TV-MPC - Start LMPC?")
 print("Starting LMPC")
 ClosedLoopLMPC = ClosedLoopData(dt, TimeLMPC, v0)
-LMPCOpenLoopData = LMPCprediction(N, n, d, TimeLMPC, numSS_Points, Laps)
-LMPCSimulator = Simulator(map, 1, 1)
+LMPCOpenLoopData = LMPCprediction(N, n, d, TimeLMPC, numSS_Points, Laps) #to store open-loop prediction and safe sets
+LMPCSimulator = Simulator(map, 1, 1) #now this simulator only runs for one lap, with the LMPC flag ON
 
 if runPWAFlag == 1:
     LMPController = PWAControllerLMPC(10, numSS_Points, numSS_it, N, Qslack, Q_LMPC, R_LMPC, dR_LMPC, n, d, shift, dt, map, Laps, TimeLMPC, LMPC_Solver)
 else:
     LMPController = ControllerLMPC(numSS_Points, numSS_it, N, Qslack, Q_LMPC, R_LMPC, dR_LMPC, n, d, shift, dt, map, Laps, TimeLMPC, LMPC_Solver)
+# add previously completed trajectories to Safe Set: 
 LMPController.addTrajectory(ClosedLoopDataPID)
 LMPController.addTrajectory(ClosedLoopDataLTV_MPC)
 
@@ -170,7 +183,7 @@ if RunLMPC == 1:
     for it in range(2, Laps):
 
         ClosedLoopLMPC.updateInitialConditions(x0, x0_glob)
-        LMPCSimulator.Sim(ClosedLoopLMPC, LMPController, LMPCOpenLoopData)
+        LMPCSimulator.Sim(ClosedLoopLMPC, LMPController, LMPCOpenLoopData) #this runs one lap at a time due to initialization!
         LMPController.addTrajectory(ClosedLoopLMPC)
 
         if LMPController.feasible == 0:
@@ -193,26 +206,19 @@ else:
     file_data.close()
 
 print("===== LMPC terminated")
+if plotFlagLMPC == 1:
+    plotClosedLoopLMPC(LMPController, map)
+    plt.show()
+
+
 # ======================================================================================================================
 # ========================================= PLOT TRACK/PREDICTIONS =====================================================
 # ======================================================================================================================
 for i in range(0, LMPController.it):
     print("Lap time at iteration ", i, " is ", LMPController.Qfun[0, i]*dt, "s")
 
-
+raw_input("Finished LMPC - Start other plots?")
 print("===== Start Plotting")
-if plotFlag == 1:
-    plotTrajectory(map, ClosedLoopDataPID.x, ClosedLoopDataPID.x_glob, ClosedLoopDataPID.u)
-
-if plotFlagMPC == 1:
-    plotTrajectory(map, ClosedLoopDataLTI_MPC.x, ClosedLoopDataLTI_MPC.x_glob, ClosedLoopDataLTI_MPC.u)
-
-if plotFlagMPC_tv == 1:
-    plotTrajectory(map, ClosedLoopDataLTV_MPC.x, ClosedLoopDataLTV_MPC.x_glob, ClosedLoopDataLTV_MPC.u)
-
-if plotFlagLMPC == 1:
-    plotClosedLoopLMPC(LMPController, map)
-
 if animation_xyFlag == 1:
     animation_xy(map, LMPCOpenLoopData, LMPController, 5)
     # saveGif_xyResults(map, LMPCOpenLoopData, LMPController, 6)
