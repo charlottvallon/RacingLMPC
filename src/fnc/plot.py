@@ -5,6 +5,23 @@ import matplotlib.patches as patches
 
 import pdb
 
+def plotMap(map):
+    Points = int(np.floor(10 * (map.PointAndTangent[-1, 3] + map.PointAndTangent[-1, 4])))
+    Points1 = np.zeros((Points, 2))
+    Points2 = np.zeros((Points, 2))
+    Points0 = np.zeros((Points, 2))
+    for i in range(0, int(Points)):
+        Points1[i, :] = map.getGlobalPosition(i * 0.1, map.width)
+        Points2[i, :] = map.getGlobalPosition(i * 0.1, -map.width)
+        Points0[i, :] = map.getGlobalPosition(i * 0.1, 0)
+
+    plt.figure()
+    plt.plot(map.PointAndTangent[:, 0], map.PointAndTangent[:, 1], 'o')
+    plt.plot(Points0[:, 0], Points0[:, 1], '--')
+    plt.plot(Points1[:, 0], Points1[:, 1], '-b')
+    plt.plot(Points2[:, 0], Points2[:, 1], '-b')
+
+
 def plotTrajectory(map, x, x_glob, u):
     Points = int(np.floor(10 * (map.PointAndTangent[-1, 3] + map.PointAndTangent[-1, 4])))
     Points1 = np.zeros((Points, 2))
@@ -44,6 +61,20 @@ def plotTrajectory(map, x, x_glob, u):
     plt.subplot(717)
     plt.plot(x[0:-1, 4], u[:, 1], '-o')
     plt.ylabel('acc')
+    
+    
+def plotSafeSet(SS,Map):
+    #to do
+    plt.figure()
+    counter = 0
+    SSPoints = np.zeros([SS.shape[0],2])
+    for lap in range(0,SS.shape[2]):
+        for state in range(0,SS.shape[0]):
+            if SS[state,0,lap]<1000:
+                SSPoints[counter,:] = Map.getGlobalPosition(SS[state,4,lap], SS[state,5,lap])
+                counter += 1
+            
+    plt.plot(SSPoints[:,0],SSPoints[:,1],'-r')
 
 def plotClosedLoopLMPC(LMPController, map):
     SS_glob = LMPController.SS_glob

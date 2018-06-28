@@ -1,6 +1,7 @@
 import numpy as np
 import numpy.linalg as la
 import pdb
+import random
 
 class Map():
     """map object
@@ -115,6 +116,7 @@ class Map():
         NewLine = np.array([xf, yf, psif, PointAndTangent[-2, 3] + PointAndTangent[-2, 4], l, 0])
         PointAndTangent[-1, :] = NewLine
 
+        self.spec = spec
         self.PointAndTangent = PointAndTangent
         self.TrackLength = PointAndTangent[-1, 3] + PointAndTangent[-1, 4]
 
@@ -274,6 +276,99 @@ class Map():
             pdb.set_trace()
 
         return s, ey, epsi, CompletedFlag
+    
+    
+    
+    def shuffle(self):
+        
+        list = range(0,self.spec.shape[0])
+        random.shuffle(list)
+        spec = self.spec[[list]]
+        
+        PointAndTangent = np.zeros((spec.shape[0] + 1, 6))
+        for i in range(0, spec.shape[0]):
+            if spec[i, 1] == 0.0:              # If the current segment is a straight line
+                l = spec[i, 0]                 # Length of the segments
+                if i == 0:
+                    ang = 0                          # Angle of the tangent vector at the starting point of the segment
+                    x = 0 + l * np.cos(ang)          # x coordinate of the last point of the segment
+                    y = 0 + l * np.sin(ang)          # y coordinate of the last point of the segment
+                else:
+                    ang = PointAndTangent[i - 1, 2]                 # Angle of the tangent vector at the starting point of the segment
+                    x = PointAndTangent[i-1, 0] + l * np.cos(ang)  # x coordinate of the last point of the segment
+                    y = PointAndTangent[i-1, 1] + l * np.sin(ang)  # y coordinate of the last point of the segment
+                psi = ang  # Angle of the tangent vector at the last point of the segment
+
+
+                if i == 0:
+                    NewLine = np.array([x, y, psi, PointAndTangent[i, 3], l, 0])
+                else:
+                    NewLine = np.array([x, y, psi, PointAndTangent[i-1, 3] + PointAndTangent[i-1, 4], l, 0])
+
+                PointAndTangent[i, :] = NewLine  # Write the new info
+            else:
+                l = spec[i, 0]                 # Length of the segment
+                r = spec[i, 1]                 # Radius of curvature
+
+
+                if r >= 0:
+                    direction = 1
+                else:
+                    direction = -1
+
+                if i == 0:
+                    ang = 0                                                      # Angle of the tangent vector at the
+                                                                                 # starting point of the segment
+                    CenterX = 0 \
+                              + np.abs(r) * np.cos(ang + direction * np.pi / 2)  # x coordinate center of circle
+                    CenterY = 0 \
+                              + np.abs(r) * np.sin(ang + direction * np.pi / 2)  # y coordinate center of circle
+                else:
+                    ang = PointAndTangent[i - 1, 2]                              # Angle of the tangent vector at the
+                                                                                 # starting point of the segment
+                    CenterX = PointAndTangent[i-1, 0] \
+                              + np.abs(r) * np.cos(ang + direction * np.pi / 2)  # x coordinate center of circle
+                    CenterY = PointAndTangent[i-1, 1] \
+                              + np.abs(r) * np.sin(ang + direction * np.pi / 2)  # y coordinate center of circle
+
+                spanAng = l / np.abs(r)  # Angle spanned by the circle
+                psi = wrap(ang + spanAng * np.sign(r))  # Angle of the tangent vector at the last point of the segment
+
+                angleNormal = wrap((direction * np.pi / 2 + ang))
+                angle = -(np.pi - np.abs(angleNormal)) * (sign(angleNormal))
+                x = CenterX + np.abs(r) * np.cos(
+                    angle + direction * spanAng)  # x coordinate of the last point of the segment
+                y = CenterY + np.abs(r) * np.sin(
+                    angle + direction * spanAng)  # y coordinate of the last point of the segment
+
+                if i == 0:
+                    NewLine = np.array([x, y, psi, PointAndTangent[i, 3], l, 1 / r])
+                else:
+                    NewLine = np.array([x, y, psi, PointAndTangent[i-1, 3] + PointAndTangent[i-1, 4], l, 1 / r])
+
+                PointAndTangent[i, :] = NewLine  # Write the new info
+            # plt.plot(x, y, 'or')
+
+
+        xs = PointAndTangent[-2, 0]
+        ys = PointAndTangent[-2, 1]
+        xf = 0
+        yf = 0
+        psif = 0
+
+        # plt.plot(xf, yf, 'or')
+        # plt.show()
+        l = np.sqrt((xf - xs) ** 2 + (yf - ys) ** 2)
+
+        NewLine = np.array([xf, yf, psif, PointAndTangent[-2, 3] + PointAndTangent[-2, 4], l, 0])
+        PointAndTangent[-1, :] = NewLine
+
+        newMap = Map(0.8);
+        newMap.spec = spec
+        newMap.PointAndTangent = PointAndTangent
+        newMap.TrackLength = PointAndTangent[-1, 3] + PointAndTangent[-1, 4]
+        
+        return newMap
 
 # ======================================================================================================================
 # ======================================================================================================================

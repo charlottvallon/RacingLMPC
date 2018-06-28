@@ -180,6 +180,7 @@ class AbstractControllerLMPC:
         # won't work for more than one LMPC lap
         if self.clustering is not None:
             self._estimate_pwa(x, u)
+    
 
     def update(self, SS, uSS, Qfun, TimeSS, it, LinPoints, LinInput):
         """update controller parameters. This function is useful to transfer information among LMPC controller
@@ -201,6 +202,65 @@ class AbstractControllerLMPC:
 
         self.LinPoints = LinPoints
         self.LinInput  = LinInput
+        
+    def splitTheSS(self, Map):        
+        intervals = Map.PointAndTangent[:,3]
+        num_modes = intervals.size
+        #add fourth dimension to safe set
+        self.splitSS = 10000*np.ones((self.SS.shape[0], self.SS.shape[1],self.SS.shape[2],num_modes))
+        
+        #populate splitSS with modes
+        for state in range(0,self.SS.shape[0]):
+            for lap in range(0,self.SS.shape[2]):
+                pointInQ = self.SS[state,4,lap]
+                while pointInQ > Map.TrackLength:
+                    pointInQ -= Map.TrackLength
+                
+                whichMode = int(np.argwhere(pointInQ>=intervals)[-1])
+                self.splitSS[state,:,lap,whichMode] = self.SS[state,:,lap]
+
+    def relTheSplitSS(self,Map):
+        intervals = Map.PointAndTangent[:,3]
+        self.relSplitSS = 10000*np.ones(self.splitSS.shape)
+        
+        #each mode's s entries gets normalized wrt the starting interval
+        for mode in range(0,self.splitSS.shape[3]):
+            relStart = intervals[mode]
+            for lap in range(0,self.splitSS.shape[2]):
+                for state in range(0,self.splitSS.shape[0]):
+                    # put condition to check if this is an arbitrary entry!
+                    if self.splitSS[state,0,lap,mode] < 1000:
+                        self.relSplitSS[state,:,lap,mode] = self.splitSS[state,:,lap,mode] - np.array([0, 0, 0, 0, relStart, 0])
+                        
+                        
+    def makeShuffledSS(self,Map):
+        intervals = Map.PointAndTangent[:,3]
+        
+        self.shuffledSS = 10000*np.ones(self.SS.shape)
+        self.shuffledSplitSS = 10000*np.ones(self.relSplitSS.shape)
+        
+        interim = 1000*np.ones(self.relSplitSS.shape)
+        
+        #turn relative safe set into absolute coordinates again
+        for mode in range(0,self.relSplitSS.shape[3]):
+            relStart = intervals[mode]
+            for lap in range(0,self.relSplitSS.shape[2]):
+                for state in range(0,self.relSplitSS.shape[0]):
+                    # put condition to check if this is an arbitrary entry!
+                    if self.relSplitSS[state,0,lap,mode] < 1000:
+                        self.shuffledSplitSS[state,:,lap,mode] = self.relSplitSS[state,:,lap,mode] + np.array([0, 0, 0, 0, relStart, 0])
+        
+        for lap in range(0,self.relSplitSS.shape[2]):
+            counter = 0;
+            for mode in range(0,self.relSplitSS.shape[3]):
+                #add point
+                for state in range(0,self.relSplitSS.shape[0]):
+                    if self.shuffledSplitSS[state,0,lap,mode] < 1000:
+                        self.shuffledSS[counter,:,lap] = self.shuffledSplitSS[state,:,lap,mode]
+                        counter += 1
+        
+        
+        
 
 class PWAControllerLMPC(AbstractControllerLMPC):
     """

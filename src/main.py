@@ -42,10 +42,10 @@ import pickle
 # ======================================================================================================================
 # ============================ Choose which controller to run ==========================================================
 # ======================================================================================================================
-RunPID     = 1; plotFlag       = 1
-RunMPC     = 1; plotFlagMPC    = 1
-RunMPC_tv  = 1; plotFlagMPC_tv = 1
-RunLMPC    = 1; plotFlagLMPC   = 1; animation_xyFlag = 1; animation_stateFlag = 0
+RunPID     = 0; plotFlag       = 0
+RunMPC     = 0; plotFlagMPC    = 0
+RunMPC_tv  = 0; plotFlagMPC_tv = 0
+RunLMPC    = 0; plotFlagLMPC   = 0; animation_xyFlag = 1; animation_stateFlag = 0
 runPWAFlag = 0; # uncomment importing pwa_cluster in LMPC.py
 testCoordChangeFlag = 0;
 plotOneStepPredictionErrors = 1;
@@ -99,11 +99,11 @@ if RunPID == 1:
     PIDController = PID(vt) #sets the reference velocity and some timers?
     simulator.Sim(ClosedLoopDataPID, PIDController) #simulates the PID controller for Time timesteps
 
-    file_data = open(sys.path[0]+'/data/ClosedLoopDataPID.obj', 'wb')
+    file_data = open('data/ClosedLoopDataPID.obj', 'wb')
     pickle.dump(ClosedLoopDataPID, file_data)
     file_data.close()
 else:
-    file_data = open(sys.path[0]+'/data/ClosedLoopDataPID.obj', 'rb')
+    file_data = open('data/ClosedLoopDataPID.obj', 'rb')
     ClosedLoopDataPID = pickle.load(file_data)
     file_data.close()
 print("===== PID terminated")
@@ -124,11 +124,13 @@ if RunMPC == 1:
     Controller_PathFollowingLTI_MPC = PathFollowingLTI_MPC(A, B, Q, R, N, vt)
     simulator.Sim(ClosedLoopDataLTI_MPC, Controller_PathFollowingLTI_MPC)
 
-    file_data = open(sys.path[0]+'/data/ClosedLoopDataLTI_MPC.obj', 'wb')
+    #file_data = open(sys.path[0]+'/data/ClosedLoopDataLTI_MPC.obj', 'wb')
+    file_data = open('data/ClosedLoopDataLTI_MPC.obj', 'wb')
     pickle.dump(ClosedLoopDataLTI_MPC, file_data)
     file_data.close()
 else:
-    file_data = open(sys.path[0]+'/data/ClosedLoopDataLTI_MPC.obj', 'rb')
+    #file_data = open(sys.path[0]+'/data/ClosedLoopDataLTI_MPC.obj', 'rb')
+    file_data = open('data/ClosedLoopDataLTI_MPC.obj', 'rb')
     ClosedLoopDataLTI_MPC = pickle.load(file_data)
     file_data.close()
 print("===== TI-MPC terminated")
@@ -145,11 +147,13 @@ if RunMPC_tv == 1:
     Controller_PathFollowingLTV_MPC = PathFollowingLTV_MPC(Q, R, N, vt, n, d, ClosedLoopDataPID.x, ClosedLoopDataPID.u, dt, map)
     simulator.Sim(ClosedLoopDataLTV_MPC, Controller_PathFollowingLTV_MPC)
 
-    file_data = open(sys.path[0]+'/data/ClosedLoopDataLTV_MPC.obj', 'wb')
+    #file_data = open(sys.path[0]+'/data/ClosedLoopDataLTV_MPC.obj', 'wb')
+    file_data = open('data/ClosedLoopDataLTV_MPC.obj', 'wb')
     pickle.dump(ClosedLoopDataLTV_MPC, file_data)
     file_data.close()
 else:
-    file_data = open(sys.path[0]+'/data/ClosedLoopDataLTV_MPC.obj', 'rb')
+    #file_data = open(sys.path[0]+'/data/ClosedLoopDataLTV_MPC.obj', 'rb')
+    file_data = open('data/ClosedLoopDataLTV_MPC.obj', 'rb')
     ClosedLoopDataLTV_MPC = pickle.load(file_data)
     file_data.close()
 print("===== TV-MPC terminated")
@@ -193,13 +197,15 @@ if RunLMPC == 1:
             x0[0,:]      = ClosedLoopLMPC.x[ClosedLoopLMPC.SimTime, :] - np.array([0, 0, 0, 0, map.TrackLength, 0])
             x0_glob[0,:] = ClosedLoopLMPC.x_glob[ClosedLoopLMPC.SimTime, :]
 
-    file_data = open(sys.path[0]+'/data/LMPController.obj', 'wb')
+    #file_data = open(sys.path[0]+'/data/LMPController.obj', 'wb')
+    file_data = open('data/LMPController.obj', 'wb')
     pickle.dump(ClosedLoopLMPC, file_data)
     pickle.dump(LMPController, file_data)
     pickle.dump(LMPCOpenLoopData, file_data)
     file_data.close()
 else:
-    file_data = open(sys.path[0]+'/data/LMPController.obj', 'rb')
+    #file_data = open(sys.path[0]+'/data/LMPController.obj', 'rb')
+    file_data = open('data/LMPController.obj', 'rb')
     ClosedLoopLMPC = pickle.load(file_data)
     LMPController  = pickle.load(file_data)
     LMPCOpenLoopData  = pickle.load(file_data)
@@ -209,6 +215,26 @@ print("===== LMPC terminated")
 if plotFlagLMPC == 1:
     plotClosedLoopLMPC(LMPController, map)
     plt.show()
+raw_input("You should not get here")
+
+# ======================================================================================================================
+# ========================================= TRACK/SAFE SET RESHUFFLING =================================================
+# ======================================================================================================================
+# split safe set into modes
+LMPController.splitTheSS(map)
+    
+# relativize safe set (set intial s --> 0)
+LMPController.relTheSplitSS(map)
+    
+# shuffle safe set according to new track
+shuffledMap = map.shuffle()    
+plotMap(shuffledMap)
+plt.show()
+
+# turn relative safe set into absolute coordinates again (in modes)
+LMPController.makeShuffledSS(shuffledMap)
+
+# could I plot the shuffled safe set in new global x-y coordinates? would be neat
 
 
 # ======================================================================================================================
