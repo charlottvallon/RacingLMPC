@@ -208,6 +208,7 @@ class AbstractControllerLMPC:
         num_modes = intervals.size
         #add fourth dimension to safe set
         self.splitSS = 10000*np.ones((self.SS.shape[0], self.SS.shape[1],self.SS.shape[2],num_modes))
+        self.splituSS = 1000*np.ones((self.uSS.shape[0],self.uSS.shape[1],self.uSS.shape[2],num_modes))
         
         #populate splitSS with modes
         for state in range(0,self.SS.shape[0]):
@@ -218,10 +219,12 @@ class AbstractControllerLMPC:
                 
                 whichMode = int(np.argwhere(pointInQ>=intervals)[-1])
                 self.splitSS[state,:,lap,whichMode] = self.SS[state,:,lap]
+                self.splituSS[state,:,lap,whichMode] = self.uSS[state,:,lap]
 
     def relTheSplitSS(self,Map):
         intervals = Map.PointAndTangent[:,3]
         self.relSplitSS = 10000*np.ones(self.splitSS.shape)
+        self.relSplituSS = 10000*np.ones(self.splituSS.shape)
         
         #each mode's s entries gets normalized wrt the starting interval
         for mode in range(0,self.splitSS.shape[3]):
@@ -231,25 +234,29 @@ class AbstractControllerLMPC:
                     # put condition to check if this is an arbitrary entry!
                     if self.splitSS[state,0,lap,mode] < 1000:
                         self.relSplitSS[state,:,lap,mode] = self.splitSS[state,:,lap,mode] - np.array([0, 0, 0, 0, relStart, 0])
-                        
-                        
+                        # we do not need to relativize the input, obviously, so we continue using splituSS
+                                         
     def makeShuffledSS(self,Map):
         intervals = Map.PointAndTangent[:,3]
         
-        self.shuffledSS = 10000*np.ones(self.SS.shape)
         self.shuffledSplitSS = 10000*np.ones(self.relSplitSS.shape)
+        self.shuffleduSS = 10000*np.ones(self.uSS.shape)
         
-        interim = 1000*np.ones(self.relSplitSS.shape)
+        #shuffle modes
+        #shuffledSplitSS = self.relSplitSS[:,:,:,Map.modeOrder.append(self.relSplitSS.shape[3])]
+        self.shuffledSplitSS = self.relSplitSS[:,:,:,Map.modeOrder]
+        self.shuffledSplituSS = self.splituSS[:,:,:,Map.modeOrder]
         
-        #turn relative safe set into absolute coordinates again
+        #shuffle modes and turn relative safe set into absolute coordinates again
         for mode in range(0,self.relSplitSS.shape[3]):
             relStart = intervals[mode]
             for lap in range(0,self.relSplitSS.shape[2]):
                 for state in range(0,self.relSplitSS.shape[0]):
                     # put condition to check if this is an arbitrary entry!
                     if self.relSplitSS[state,0,lap,mode] < 1000:
-                        self.shuffledSplitSS[state,:,lap,mode] = self.relSplitSS[state,:,lap,mode] + np.array([0, 0, 0, 0, relStart, 0])
+                        self.shuffledSplitSS[state,:,lap,mode] = self.shuffledSplitSS[state,:,lap,mode] + np.array([0, 0, 0, 0, relStart, 0])
         
+        #append everything together again; just need to have fewer than 4000 samples given these numbers
         for lap in range(0,self.relSplitSS.shape[2]):
             counter = 0;
             for mode in range(0,self.relSplitSS.shape[3]):
@@ -257,9 +264,9 @@ class AbstractControllerLMPC:
                 for state in range(0,self.relSplitSS.shape[0]):
                     if self.shuffledSplitSS[state,0,lap,mode] < 1000:
                         self.shuffledSS[counter,:,lap] = self.shuffledSplitSS[state,:,lap,mode]
+                        self.shuffleduSS[counter,:,lap] = self.shuffledSplituSS[state,:,lap,mode]
                         counter += 1
-        
-        
+              
         
 
 class PWAControllerLMPC(AbstractControllerLMPC):

@@ -24,7 +24,7 @@ class Map():
                          [40 * 0.03, +40 * 0.03 * 10 / np.pi],
                          [80 * 0.03, -80 * 0.03 * 2 / np.pi],
                          [20 * 0.03, 0],
-                         [80 * 0.03, -80 * 0.03 * 2 / np.pi]])
+                         [80 * 0.03, -80 * 0.03 * 2 / np.pi]]) # repeat the last one again?
 
 
         # spec = np.array([[1.0, 0],
@@ -284,6 +284,7 @@ class Map():
         list = range(0,self.spec.shape[0])
         random.shuffle(list)
         spec = self.spec[[list]]
+        self.modeOrder = list
         
         PointAndTangent = np.zeros((spec.shape[0] + 1, 6))
         for i in range(0, spec.shape[0]):
@@ -368,6 +369,7 @@ class Map():
         newMap.PointAndTangent = PointAndTangent
         newMap.TrackLength = PointAndTangent[-1, 3] + PointAndTangent[-1, 4]
         
+        newMap.modeOrder = list
         return newMap
 
 # ======================================================================================================================

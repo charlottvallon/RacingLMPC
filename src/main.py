@@ -231,11 +231,12 @@ shuffledMap = map.shuffle()
 plotMap(shuffledMap)
 plt.show()
 
+raw_input("Stop here")
 # turn relative safe set into absolute coordinates again (in modes)
 LMPController.makeShuffledSS(shuffledMap)
 
+raw_input("Finished the shuffling!!")
 # could I plot the shuffled safe set in new global x-y coordinates? would be neat
-
 
 # ======================================================================================================================
 # ========================================= PLOT TRACK/PREDICTIONS =====================================================
