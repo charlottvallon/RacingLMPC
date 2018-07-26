@@ -14,7 +14,7 @@ class Map():
         Modify the vector spec to change the geometry of the track
         """
         self.width = width
-        spec = np.array([[60 * 0.03, 0],
+        spec = np.array([[140 * 0.03, 0],
                          [80 * 0.03, -80 * 0.03 * 2 / np.pi],
                          # Note s = 1 * np.pi / 2 and r = -1 ---> Angle spanned = np.pi / 2
                          [20 * 0.03, 0],
@@ -38,7 +38,9 @@ class Map():
         # these points. For each segment we compute the (x, y, psi) coordinate at the last point of the segment. Furthermore,
         # we compute also the cumulative s at the starting point of the segment at signed curvature
         # PointAndTangent = [x, y, psi, cumulative s, segment length, signed curvature]
-        PointAndTangent = np.zeros((spec.shape[0] + 1, 6))
+        
+        #PointAndTangent = np.zeros((spec.shape[0] + 1, 6)) 
+        PointAndTangent = np.zeros((spec.shape[0], 6)) 
         for i in range(0, spec.shape[0]):
             if spec[i, 1] == 0.0:              # If the current segment is a straight line
                 l = spec[i, 0]                 # Length of the segments
@@ -113,8 +115,8 @@ class Map():
         # plt.show()
         l = np.sqrt((xf - xs) ** 2 + (yf - ys) ** 2)
 
-        NewLine = np.array([xf, yf, psif, PointAndTangent[-2, 3] + PointAndTangent[-2, 4], l, 0])
-        PointAndTangent[-1, :] = NewLine
+        #NewLine = np.array([xf, yf, psif, PointAndTangent[-2, 3] + PointAndTangent[-2, 4], l, 0])
+        #PointAndTangent[-1, :] = NewLine
 
         self.spec = spec
         self.PointAndTangent = PointAndTangent
@@ -133,7 +135,7 @@ class Map():
         PointAndTangent = self.PointAndTangent
 
         index = np.all([[s >= PointAndTangent[:, 3]], [s < PointAndTangent[:, 3] + PointAndTangent[:, 4]]], axis=0)
-        i = int(np.where(np.squeeze(index))[0])
+        i = int((np.where(np.squeeze(index))[0]))
 
         if PointAndTangent[i, 5] == 0.0:  # If segment is a straight line
             # Extract the first final and initial point of the segment
@@ -286,7 +288,8 @@ class Map():
         spec = self.spec[[list]]
         self.modeOrder = list
         
-        PointAndTangent = np.zeros((spec.shape[0] + 1, 6))
+        #PointAndTangent = np.zeros((spec.shape[0] + 1, 6))
+        PointAndTangent = np.zeros((spec.shape[0], 6))
         for i in range(0, spec.shape[0]):
             if spec[i, 1] == 0.0:              # If the current segment is a straight line
                 l = spec[i, 0]                 # Length of the segments
@@ -361,8 +364,8 @@ class Map():
         # plt.show()
         l = np.sqrt((xf - xs) ** 2 + (yf - ys) ** 2)
 
-        NewLine = np.array([xf, yf, psif, PointAndTangent[-2, 3] + PointAndTangent[-2, 4], l, 0])
-        PointAndTangent[-1, :] = NewLine
+        #NewLine = np.array([xf, yf, psif, PointAndTangent[-2, 3] + PointAndTangent[-2, 4], l, 0])
+        #PointAndTangent[-1, :] = NewLine
 
         newMap = Map(0.8);
         newMap.spec = spec

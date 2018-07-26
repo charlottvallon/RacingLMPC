@@ -33,19 +33,19 @@ from PathFollowingLTIMPC import PathFollowingLTI_MPC
 from Track import Map, unityTestChangeOfCoordinates
 from LMPC import ControllerLMPC, PWAControllerLMPC
 from Utilities import Regression
-from plot import plotTrajectory, plotClosedLoopLMPC, animation_xy, animation_states, saveGif_xyResults, Save_statesAnimation
+from plot import plotTrajectory, plotClosedLoopLMPC, animation_xy, animation_states, saveGif_xyResults, Save_statesAnimation, plotMap, plotSafeSet
 import numpy as np
 import matplotlib.pyplot as plt
 import pdb
 import pickle
 
 # ======================================================================================================================
-# ============================ Choose which controller to run ==========================================================
+# ============================ Choose which controller to run to set up problem ========================================
 # ======================================================================================================================
 RunPID     = 0; plotFlag       = 0
 RunMPC     = 0; plotFlagMPC    = 0
 RunMPC_tv  = 0; plotFlagMPC_tv = 0
-RunLMPC    = 0; plotFlagLMPC   = 0; animation_xyFlag = 1; animation_stateFlag = 0
+RunLMPC    = 1; plotFlagLMPC   = 0; animation_xyFlag = 1; animation_stateFlag = 0
 runPWAFlag = 0; # uncomment importing pwa_cluster in LMPC.py
 testCoordChangeFlag = 0;
 plotOneStepPredictionErrors = 1;
@@ -174,6 +174,8 @@ if runPWAFlag == 1:
     LMPController = PWAControllerLMPC(10, numSS_Points, numSS_it, N, Qslack, Q_LMPC, R_LMPC, dR_LMPC, n, d, shift, dt, map, Laps, TimeLMPC, LMPC_Solver)
 else:
     LMPController = ControllerLMPC(numSS_Points, numSS_it, N, Qslack, Q_LMPC, R_LMPC, dR_LMPC, n, d, shift, dt, map, Laps, TimeLMPC, LMPC_Solver)
+    onlyLMPController = ControllerLMPC(numSS_Points, numSS_it, N, Qslack, Q_LMPC, R_LMPC, dR_LMPC, n, d, shift, dt, map, Laps, TimeLMPC, LMPC_Solver)
+
 # add previously completed trajectories to Safe Set: 
 LMPController.addTrajectory(ClosedLoopDataPID)
 LMPController.addTrajectory(ClosedLoopDataLTV_MPC)
@@ -189,6 +191,7 @@ if RunLMPC == 1:
         ClosedLoopLMPC.updateInitialConditions(x0, x0_glob)
         LMPCSimulator.Sim(ClosedLoopLMPC, LMPController, LMPCOpenLoopData) #this runs one lap at a time due to initialization!
         LMPController.addTrajectory(ClosedLoopLMPC)
+        onlyLMPController.addTrajectory(ClosedLoopLMPC)
 
         if LMPController.feasible == 0:
             break
@@ -212,76 +215,109 @@ else:
     file_data.close()
 
 print("===== LMPC terminated")
+
 if plotFlagLMPC == 1:
     plotClosedLoopLMPC(LMPController, map)
     plt.show()
-raw_input("You should not get here")
 
+# plot the safe set along the map 
+plotSafeSet(onlyLMPController.SS,map)
+raw_input("LMPC on original track is done.")
+
+# <codecell>
 # ======================================================================================================================
 # ========================================= TRACK/SAFE SET RESHUFFLING =================================================
 # ======================================================================================================================
+# pre-process LMPC.Qfun to avoid the negatives
+onlyLMPController.processQfun()
+
 # split safe set into modes
-LMPController.splitTheSS(map)
+onlyLMPController.splitTheSS(map)
     
 # relativize safe set (set intial s --> 0)
-LMPController.relTheSplitSS(map)
+onlyLMPController.relTheSplitSS(map)
     
 # shuffle safe set according to new track
 shuffledMap = map.shuffle()    
-plotMap(shuffledMap)
-plt.show()
 
-raw_input("Stop here")
 # turn relative safe set into absolute coordinates again (in modes)
-LMPController.makeShuffledSS(shuffledMap)
+onlyLMPController.makeShuffledSS(shuffledMap)
+plotSafeSet(onlyLMPController.shuffledSS, shuffledMap)
+raw_input("Shuffling of original safe set is done.")
 
-raw_input("Finished the shuffling!!")
-# could I plot the shuffled safe set in new global x-y coordinates? would be neat
 
+# <codecell> 
+# ======================================================================================================================
+# ========================================= REACHABILITY ANALYSIS ======================================================
+# ======================================================================================================================
+onlyLMPController.reachabilityAnalysis(A,B,Qslack)
+plotSafeSet(onlyLMPController.reachableSS,shuffledMap)
+onlyLMPController.reorganizeReachableSafeSet()
+raw_input("Reachability analysis on new track is done.")
+
+
+# <codecell> 
+# ======================================================================================================================
+# ========================================= LMPC on SHUFFLED TRACK =====================================================
+# ======================================================================================================================
+# We will compare performance of the LMPC controller on the shuffled track. In particular, we consider two cases:
+#   1. Performance of the LMPC controller initialized with the PID+TVMPC Safe Set
+#   2. Performance of the LMPC controller initialized with the Reachable+TVMPC SafeSet 
+# Performance will be evaluated on iterations required to traverse the course
+
+# 0. Set up for simulation on new track
+
+
+
+
+
+# <codecell> 
 # ======================================================================================================================
 # ========================================= PLOT TRACK/PREDICTIONS =====================================================
 # ======================================================================================================================
-for i in range(0, LMPController.it):
-    print("Lap time at iteration ", i, " is ", LMPController.Qfun[0, i]*dt, "s")
-
-raw_input("Finished LMPC - Start other plots?")
-print("===== Start Plotting")
-if animation_xyFlag == 1:
-    animation_xy(map, LMPCOpenLoopData, LMPController, 5)
-    # saveGif_xyResults(map, LMPCOpenLoopData, LMPController, 6)
-
-if animation_stateFlag == 1:
-    animation_states(map, LMPCOpenLoopData, LMPController, 5)
-    # Save_statesAnimation(map, LMPCOpenLoopData, LMPController, 5)
-
-if testCoordChangeFlag == 1:
-    unityTestChangeOfCoordinates(map, ClosedLoopDataPID)
-    unityTestChangeOfCoordinates(map, ClosedLoopDataLTI_MPC)
-    unityTestChangeOfCoordinates(map, ClosedLoopLMPC)
-
-if plotOneStepPredictionErrors == 1:
-    it=5
-    onestep_errors = []
-    onestep_norm_errors = []
-    for i in range(1, int(LMPController.TimeSS[it])):
-        current_state = LMPController.SS[i, :, it]
-        current_pos = LMPController.SS[i, 4:6, it]
-        predicted_trajectory = LMPCOpenLoopData.PredictedStates[:, :, i-1, it]
-        predicted_state = predicted_trajectory[1,:]
-        onestep_errors.append(predicted_state-current_state)
-        onestep_norm_errors.append(np.linalg.norm(predicted_state-current_state))
-
-    plt.figure();
-    onestep_errors = np.array(onestep_errors)
-    state_names = ['vx', 'vy', 'wz', 'epsi', 's', 'ey']
-    for state in range(onestep_errors.shape[1]):
-        if state == 0:
-            plt.title('One Step Prediction Error')
-        plt.subplot(onestep_errors.shape[1], 1, state+1)
-        plt.plot(onestep_errors[:,state])
-        plt.ylabel(state_names[state])
-
-plt.show()
-
+# =============================================================================
+# for i in range(0, LMPController.it):
+#     print("Lap time at iteration ", i, " is ", LMPController.Qfun[0, i]*dt, "s")
+# 
+# raw_input("Finished LMPC - Start other plots?")
+# print("===== Start Plotting")
+# if animation_xyFlag == 1:
+#     animation_xy(map, LMPCOpenLoopData, LMPController, 5)
+#     # saveGif_xyResults(map, LMPCOpenLoopData, LMPController, 6)
+# 
+# if animation_stateFlag == 1:
+#     animation_states(map, LMPCOpenLoopData, LMPController, 5)
+#     # Save_statesAnimation(map, LMPCOpenLoopData, LMPController, 5)
+# 
+# if testCoordChangeFlag == 1:
+#     unityTestChangeOfCoordinates(map, ClosedLoopDataPID)
+#     unityTestChangeOfCoordinates(map, ClosedLoopDataLTI_MPC)
+#     unityTestChangeOfCoordinates(map, ClosedLoopLMPC)
+# 
+# if plotOneStepPredictionErrors == 1:
+#     it=5
+#     onestep_errors = []
+#     onestep_norm_errors = []
+#     for i in range(1, int(LMPController.TimeSS[it])):
+#         current_state = LMPController.SS[i, :, it]
+#         current_pos = LMPController.SS[i, 4:6, it]
+#         predicted_trajectory = LMPCOpenLoopData.PredictedStates[:, :, i-1, it]
+#         predicted_state = predicted_trajectory[1,:]
+#         onestep_errors.append(predicted_state-current_state)
+#         onestep_norm_errors.append(np.linalg.norm(predicted_state-current_state))
+# 
+#     plt.figure();
+#     onestep_errors = np.array(onestep_errors)
+#     state_names = ['vx', 'vy', 'wz', 'epsi', 's', 'ey']
+#     for state in range(onestep_errors.shape[1]):
+#         if state == 0:
+#             plt.title('One Step Prediction Error')
+#         plt.subplot(onestep_errors.shape[1], 1, state+1)
+#         plt.plot(onestep_errors[:,state])
+#         plt.ylabel(state_names[state])
+# 
+# plt.show()
+# 
+# =============================================================================
 
 

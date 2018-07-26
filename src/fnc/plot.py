@@ -20,6 +20,8 @@ def plotMap(map):
     plt.plot(Points0[:, 0], Points0[:, 1], '--')
     plt.plot(Points1[:, 0], Points1[:, 1], '-b')
     plt.plot(Points2[:, 0], Points2[:, 1], '-b')
+    plt.ylim(-7.5, 7.5)
+    plt.xlim(-7.5,7.5)
 
 
 def plotTrajectory(map, x, x_glob, u):
@@ -71,10 +73,31 @@ def plotSafeSet(SS,Map):
     for lap in range(0,SS.shape[2]):
         for state in range(0,SS.shape[0]):
             if SS[state,0,lap]<1000:
-                SSPoints[counter,:] = Map.getGlobalPosition(SS[state,4,lap], SS[state,5,lap])
-                counter += 1
-            
-    plt.plot(SSPoints[:,0],SSPoints[:,1],'-r')
+                #print(counter)
+                try:
+                    SSPoints[counter,:] = Map.getGlobalPosition(SS[state,4,lap], SS[state,5,lap])
+                    counter += 1
+                except TypeError:
+                    print("something about the nonetype again")
+                    
+    plt.plot(SSPoints[:,0],SSPoints[:,1],'.r')
+    
+    Points = int(np.floor(10 * (Map.PointAndTangent[-1, 3] + Map.PointAndTangent[-1, 4])))
+    Points1 = np.zeros((Points, 2))
+    Points2 = np.zeros((Points, 2))
+    Points0 = np.zeros((Points, 2))
+    for i in range(0, int(Points)):
+        Points1[i, :] = Map.getGlobalPosition(i * 0.1, Map.width)
+        Points2[i, :] = Map.getGlobalPosition(i * 0.1, -Map.width)
+        Points0[i, :] = Map.getGlobalPosition(i * 0.1, 0)
+
+    plt.plot(Map.PointAndTangent[:, 0], Map.PointAndTangent[:, 1], 'o')
+    plt.plot(Points0[:, 0], Points0[:, 1], '--')
+    plt.plot(Points1[:, 0], Points1[:, 1], '-b')
+    plt.plot(Points2[:, 0], Points2[:, 1], '-b')
+    plt.ylim(-7.5, 7.5)
+    plt.xlim(-7.5,7.5)
+    plt.show()
 
 def plotClosedLoopLMPC(LMPController, map):
     SS_glob = LMPController.SS_glob

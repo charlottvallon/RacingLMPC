@@ -11,6 +11,7 @@ from pathos.multiprocessing import ProcessingPool as Pool
 from Utilities import Curvature
 from numpy import hstack, inf, ones
 from scipy.sparse import vstack
+from numpy import eye
 # from osqp import OSQP
 
 from abc import ABCMeta, abstractmethod
@@ -207,8 +208,9 @@ class AbstractControllerLMPC:
         intervals = Map.PointAndTangent[:,3]
         num_modes = intervals.size
         #add fourth dimension to safe set
-        self.splitSS = 10000*np.ones((self.SS.shape[0], self.SS.shape[1],self.SS.shape[2],num_modes))
+        self.splitSS = 1000*np.ones((self.SS.shape[0], self.SS.shape[1],self.SS.shape[2],num_modes))
         self.splituSS = 1000*np.ones((self.uSS.shape[0],self.uSS.shape[1],self.uSS.shape[2],num_modes))
+        self.splitQfun = 1000*np.ones((self.Qfun.shape[0],self.Qfun.shape[1],num_modes))
         
         #populate splitSS with modes
         for state in range(0,self.SS.shape[0]):
@@ -218,13 +220,15 @@ class AbstractControllerLMPC:
                     pointInQ -= Map.TrackLength
                 
                 whichMode = int(np.argwhere(pointInQ>=intervals)[-1])
-                self.splitSS[state,:,lap,whichMode] = self.SS[state,:,lap]
+                interm = self.SS[state,:,lap]
+                interm[4] = pointInQ
+                self.splitSS[state,:,lap,whichMode] = interm
                 self.splituSS[state,:,lap,whichMode] = self.uSS[state,:,lap]
+                self.splitQfun[state,lap,whichMode] = self.Qfun[state,lap]
 
     def relTheSplitSS(self,Map):
         intervals = Map.PointAndTangent[:,3]
         self.relSplitSS = 10000*np.ones(self.splitSS.shape)
-        self.relSplituSS = 10000*np.ones(self.splituSS.shape)
         
         #each mode's s entries gets normalized wrt the starting interval
         for mode in range(0,self.splitSS.shape[3]):
@@ -239,13 +243,16 @@ class AbstractControllerLMPC:
     def makeShuffledSS(self,Map):
         intervals = Map.PointAndTangent[:,3]
         
-        self.shuffledSplitSS = 10000*np.ones(self.relSplitSS.shape)
+        #self.shuffledSplitSS = 10000*np.ones(self.relSplitSS.shape)
+        self.shuffledSS = 10000*np.ones(self.SS.shape)
         self.shuffleduSS = 10000*np.ones(self.uSS.shape)
+        self.shuffledQfun = 10000*np.ones(self.Qfun.shape)
         
         #shuffle modes
         #shuffledSplitSS = self.relSplitSS[:,:,:,Map.modeOrder.append(self.relSplitSS.shape[3])]
         self.shuffledSplitSS = self.relSplitSS[:,:,:,Map.modeOrder]
         self.shuffledSplituSS = self.splituSS[:,:,:,Map.modeOrder]
+        self.shuffledSplitQfun = self.splitQfun[:,:,Map.modeOrder]
         
         #shuffle modes and turn relative safe set into absolute coordinates again
         for mode in range(0,self.relSplitSS.shape[3]):
@@ -253,7 +260,7 @@ class AbstractControllerLMPC:
             for lap in range(0,self.relSplitSS.shape[2]):
                 for state in range(0,self.relSplitSS.shape[0]):
                     # put condition to check if this is an arbitrary entry!
-                    if self.relSplitSS[state,0,lap,mode] < 1000:
+                    if self.shuffledSplitSS[state,0,lap,mode] < 1000:
                         self.shuffledSplitSS[state,:,lap,mode] = self.shuffledSplitSS[state,:,lap,mode] + np.array([0, 0, 0, 0, relStart, 0])
         
         #append everything together again; just need to have fewer than 4000 samples given these numbers
@@ -265,8 +272,236 @@ class AbstractControllerLMPC:
                     if self.shuffledSplitSS[state,0,lap,mode] < 1000:
                         self.shuffledSS[counter,:,lap] = self.shuffledSplitSS[state,:,lap,mode]
                         self.shuffleduSS[counter,:,lap] = self.shuffledSplituSS[state,:,lap,mode]
+                        self.shuffledQfun[counter,lap] = self.shuffledSplitQfun[state,lap,mode]
                         counter += 1
-              
+    
+    def processQfun(self):
+        for lap in range(0,self.Qfun.shape[1]):
+            for state in range(0,self.Qfun.shape[0]):
+                if self.Qfun[state,lap]<=0:
+                    self.Qfun[state,lap]=1000
+                    
+    def reorganizeReachableSafeSet(self):
+        # reorganize reachableSS, reachableuSS, reachableQfun to start at the top of the matrix               
+        # reachableSS:        
+        for lap in range(self.reachableSS.shape[2]):
+            tbc = self.reachableSS[:,:,lap]
+            count = 0
+            for state in range(tbc.shape[0]):
+                if tbc[state,0]<1000:
+                    tbc[count,:] = tbc[state,:]
+                    count+=1                    
+            while count < tbc.shape[0]:
+                tbc[count,:] = 1000*np.ones((1,6))
+                count+=1
+            self.reachableSS[:,:,lap] = tbc
+        
+        # reachableuSS:
+        for lap in range(self.reachableuSS.shape[2]):
+            tbc = self.reachableuSS[:,:,lap]
+            count = 0
+            for state in range(tbc.shape[0]):
+                if tbc[state,0]<1000:
+                    tbc[count,:] = tbc[state,:]
+                    count+=1                    
+            while count < tbc.shape[0]:
+                tbc[count,:] = 1000*np.ones((1,2))
+                count+=1
+            self.reachableuSS[:,:,lap] = tbc
+        
+        #reachableQfun:
+        for lap in range(self.reachableQfun.shape[1]):
+            tbc = self.reachableQfun[:,lap]
+            count = 0
+            for state in range(tbc.shape[0]):
+                if tbc[state]<1000:
+                    tbc[count] = tbc[state]
+                    count+=1
+            while count<len(tbc):
+                tbc[count]=1000
+                count+=1
+            self.reachableQfun[:,lap] = tbc
+        
+        
+    def reachabilityAnalysis(self,A,B,Qslack):
+        # reachableSplitSS is initialized to size of shuffledSplitSS
+        reachableSplitSS = 1000*np.ones(self.shuffledSplitSS.shape)
+        reachableSplituSS = 1000*np.ones(self.shuffledSplituSS.shape)
+        reachableSplitQfun = 1000*np.ones(self.shuffledSplitQfun.shape)
+        
+        # last mode (10) of reachableSplitSS is initialized to shuffledSplitSS(:,:,:,10)
+        reachableSplitSS[:,:,:,-1] = self.shuffledSplitSS[:,:,:,-1]
+        reachableSplituSS[:,:,:,-1] = self.shuffledSplituSS[:,:,:,-1]
+        reachableSplitQfun[:,:,-1] = self.initializeShuffledCost(self.shuffledSplitQfun[:,:,-1]) #all entries[0] over all laps[1]
+        # this works, verified
+                
+        # moving backwards through the shuffled modes
+        for mode_iter in range(2,self.shuffledSplitSS.shape[3]+1):
+        #for mode_iter in range(2,3):
+            mode = self.shuffledSplitSS.shape[3]-mode_iter            
+            #print 'Trying to connect modes ',mode,' and ', mode+1
+            modeConnectionFound = False
+            minCost = 10000;
+            
+            # iterating through each lap
+            for lap in range(0,self.shuffledSplitSS.shape[2]):
+            #for lap in range(0,1):
+                array = self.shuffledSplitSS[:,4,lap,mode]
+                startpoint_index = np.argmax(np.multiply(array,array<1000))
+                startpoint = self.shuffledSplitSS[startpoint_index,:,lap,mode]                    
+                
+                lapConnectionFound = False
+                
+                # iterate through the first points of the laps in the next shuffled mode
+                for cont_lap in range(0,reachableSplitSS.shape[2]):
+                    array = reachableSplitSS[:,4,cont_lap,mode+1]
+                    endpoint_index = np.argmin(array)                   
+                    endpoint = reachableSplitSS[endpoint_index,:,cont_lap,mode+1]
+                    endcost = reachableSplitQfun[endpoint_index,cont_lap,mode+1]
+                    
+                    status, ninput, cost = self.isReachable(startpoint,endpoint, endcost, A, B, Qslack)
+                    
+                    if status and cost < minCost:
+                        #print 'Lap ', lap, ' connected to lap ', cont_lap
+                        lapConnectionFound = True
+                        modeConnectionFound = True
+                        bestNextLap = cont_lap
+                        
+                        minCost = cost
+                        reachableSplitSS[:,:,lap,mode] = self.shuffledSplitSS[:,:,lap,mode]
+
+                        inputMatrixSize = np.argwhere(self.shuffledSplituSS[:,0,lap,mode]<1000)                            
+                        reachableSplituSS[:,:,lap,mode] = self.shuffledSplituSS[:,:,lap,mode]
+                        reachableSplituSS[inputMatrixSize,:,lap,mode] = ninput
+                        reachableSplitQfun[:,lap,mode] = self.updateShuffledCost(self.shuffledSplitQfun[:,lap,mode], reachableSplitQfun[:,cont_lap,mode+1])        
+                        #print 'Cost vector: ', reachableSplitQfun[reachableSplitQfun[:,lap,mode]<1000,lap,mode]
+                        
+                if lapConnectionFound:
+                    for fixMode in range(mode+1,self.shuffledSplitSS.shape[3]):
+                        reachableSplitSS[:,:,lap,fixMode] = reachableSplitSS[:,:,bestNextLap,fixMode]
+                        reachableSplituSS[:,:,lap,fixMode] = reachableSplituSS[:,:,bestNextLap,fixMode]
+                        reachableSplitQfun[:,lap,fixMode] = reachableSplitQfun[:,bestNextLap,fixMode]   
+                else: 
+                    # delete the numbers for that lap (implemented by setting to 10000)
+                    reachableSplitSS[:,:,lap,mode] = 1000*np.ones((reachableSplitSS.shape[0],reachableSplitSS.shape[1]))   
+                    
+            if modeConnectionFound:
+                print 'Connected modes ', mode, ' and ', mode+1
+            else: 
+                print 'Could not connect modes ', mode, ' and ', mode+1, '. Exiting.'
+                return 
+               
+        # reachableSS is initialized to size of shuffledSS
+        reachableSS = 1000*np.ones(self.shuffledSS.shape)
+        reachableuSS = 1000*np.ones(self.shuffleduSS.shape)
+        reachableQfun = 1000*np.ones(self.shuffledQfun.shape)
+            
+        # recombine reachableSplitSS into reachableSS! 
+        for lap in range(0,reachableSplitSS.shape[2]):
+            counter = 0;
+            for mode in range(0,reachableSplitSS.shape[3]):
+                #add point
+                for state in range(0,reachableSplitSS.shape[0]):
+                    if reachableSplitSS[state,0,lap,mode] < 1000:
+                        reachableSS[counter,:,lap] = reachableSplitSS[state,:,lap,mode]
+                        reachableuSS[counter,:,lap] = reachableSplituSS[state,:,lap,mode]
+                        reachableQfun[counter,lap] = reachableSplitQfun[state,lap,mode]
+                        counter += 1
+                       
+        self.reachableSplitSS = reachableSplitSS
+        self.reachableSplituSS = reachableSplituSS
+        self.reachableSplitQfun = reachableSplitQfun
+        self.reachableSS = reachableSS
+        self.reachableuSS = reachableuSS
+        self.reachableQfun = reachableQfun
+        
+        
+    def initializeShuffledCost(self,Qarray):
+        resetQarray = 1000*np.ones(Qarray.shape)
+        for lap in range(Qarray.shape[1]):
+            num_steps_in_mode = sum(Qarray[:,lap]<1000)
+            step_indices = np.argwhere(Qarray[:,lap]<1000)
+            resetQarray[step_indices,lap] = np.arange(num_steps_in_mode,0,-1).reshape((-1,1))           
+        return resetQarray
+    
+    def updateShuffledCost(self, Qvec, nextModeQvec):
+        # these are vectors, no longer arrays as in initializeShuffledCost
+        resetQvec = 1000*np.ones(Qvec.shape)
+        num_steps_in_mode = sum(Qvec<1000)
+        step_indices = np.argwhere(Qvec<1000)
+        
+        # cost of next step
+        start_cost = max(nextModeQvec[nextModeQvec<1000])
+        
+        resetQvec[step_indices] = start_cost + np.arange(num_steps_in_mode,0,-1).reshape((-1,1))
+        
+        return resetQvec
+        
+    def isReachable(self, x0, xf, Qend, A, B, Qslack):
+        
+        M, q, F, b, G, d = self.BuildReachableQP(x0, xf, Qend, A, B, Qslack)
+        sol = qp(matrix(M), matrix(q), matrix(F), matrix(b), matrix(G), matrix(d))
+        if sol['status'] == 'optimal':
+            status = True
+        else:
+            status = False    
+        Solution = np.squeeze(sol['x']) 
+        
+        # need to return: status, input, optimization cost
+        ninput = [Solution[-3], Solution[-2]]
+        
+        # extract cost associated with solution?
+        cost = sol['primal objective']
+        
+        return status, ninput, cost
+    
+    def BuildReachableQP(self, x0, xf, Qend, A, B, Qslack):
+        num_x = A.shape[0]
+        num_u = B.shape[1]
+        size_z = 3*num_x + num_u + 1
+        
+        max_slack_value = 0.5 #should be much smaller!!!!!
+        
+        # Cost matrices M, q: 
+        #x0, xf
+        M1 = 0*np.eye(A.shape[0])
+        #xf
+        M2 = 0*np.eye(A.shape[0])
+        #M3 = Qslack
+        #u and xc
+        M4 = np.zeros((3,3))
+        # append
+        M = linalg.block_diag(M1, M2, Qslack, M4)
+        
+        q = np.zeros((size_z,1))
+        q[-1] = 10
+        
+        # Inequality constraints (on input and slack variable) F, b: 
+        Fu = np.array([[1., 0.],
+                   [-1., 0.],
+                   [0., 1.],
+                   [0., -1.]])
+        bu = np.array([[0.5],  # Max Steering
+                   [0.5],  # Max Steering
+                   [1.],  # Max Acceleration
+                   [1.]])    
+        Fs = np.vstack((np.eye(num_x),-np.eye(num_x)))
+        bs = max_slack_value*np.ones((2*num_x,1))       
+        F1 = np.hstack((np.zeros((4,3*A.shape[0])),Fu,np.zeros((4,1))))
+        F2 = np.hstack((np.zeros((12,12)),Fs,np.zeros((12,3))))
+        F = np.vstack((F1,F2))
+        b = np.vstack((bu,bs))
+        
+        # Equality constraints G, d:     
+        xvec = np.concatenate((x0,xf),axis=0)
+        d = np.vstack((xvec[:,None],np.zeros((A.shape[0],1)),[[Qend]]))
+        G1 = np.hstack((np.eye(6),np.zeros((A.shape[0],size_z-A.shape[0]))))
+        G2 = np.hstack((np.zeros((A.shape[0],A.shape[0])), np.eye(A.shape[0]), np.eye(A.shape[0]), np.zeros((A.shape[0],B.shape[1]+1))))
+        G3 = np.hstack(( -A, np.eye(6), np.zeros((num_x, num_x)), -B, np.zeros((num_x,1)) ))
+        G4 = np.hstack(( np.zeros((1, size_z-1)), [[1]] ))
+        G = np.vstack((G1,G2,G3,G4))     
+        
+        return M, q, F, b, G, d
         
 
 class PWAControllerLMPC(AbstractControllerLMPC):
