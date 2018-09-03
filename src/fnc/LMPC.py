@@ -121,6 +121,7 @@ class AbstractControllerLMPC:
 
         # Extract solution and set linearization points
         xPred, uPred, lambd, slack = LMPC_GetPred(Solution, self.n, self.d, self.N)
+        #print uPred
         self.xPred = xPred.T
         if self.N == 1:
             self.uPred    = np.array([[uPred[0], uPred[1]]])
@@ -137,9 +138,31 @@ class AbstractControllerLMPC:
         if self.clustering is not None:
             pwa_pred = self.clustering.get_prediction(np.hstack([self.xPred[0],self.uPred[0]]))
             self.xPred[1] = pwa_pred
+    
+    def addReachableSet(self,rSS,ruSS,rQfun,shuffledMap):
+        it = self.it
+        end_it = rSS.shape[0]
         
+        self.TimeSS[it] = end_it
+        self.SS[0:end_it, :, it] = rSS
         
-
+        rSS_glob = 1000*np.ones(rSS.shape)
+        for state in range(rSS.shape[0]):
+            rSS_glob[state,:] = rSS[state,:]
+            global_values = shuffledMap.getGlobalPosition(rSS[state,4],rSS[state,5])
+            rSS_glob[state,4] = global_values[0]
+            rSS_glob[state,5] = global_values[1]
+        self.SS_glob[0:end_it, :, it] = rSS_glob
+               
+        self.uSS[0:end_it, :, it] = ruSS
+        self.Qfun[0:end_it, it] = rQfun
+        
+        if self.it == 0:
+            self.LinPoints = self.SS[1:self.N + 2, :, it]
+            self.LinInput  = self.uSS[1:self.N + 1, :, it]
+            
+        self.it = self.it + 1
+        
     def addTrajectory(self, ClosedLoopData):
         """update iteration index and construct SS, uSS and Qfun
         Arguments:
@@ -323,7 +346,9 @@ class AbstractControllerLMPC:
             self.reachableQfun[:,lap] = tbc
         
         
-    def reachabilityAnalysis(self,A,B,Qslack):
+    def reachabilityAnalysis(self,A,B,Qslack,N):
+        local_tv_N = 5
+        
         # reachableSplitSS is initialized to size of shuffledSplitSS
         reachableSplitSS = 1000*np.ones(self.shuffledSplitSS.shape)
         reachableSplituSS = 1000*np.ones(self.shuffledSplituSS.shape)
@@ -337,37 +362,57 @@ class AbstractControllerLMPC:
                 
         # moving backwards through the shuffled modes
         for mode_iter in range(2,self.shuffledSplitSS.shape[3]+1):
-        #for mode_iter in range(2,3):
             mode = self.shuffledSplitSS.shape[3]-mode_iter            
             #print 'Trying to connect modes ',mode,' and ', mode+1
             modeConnectionFound = False
-            minCost = 10000;
+            #minCost = 10000;
+            minSlack = 0.4;
             
             # iterating through each lap
-            for lap in range(0,self.shuffledSplitSS.shape[2]):
-            #for lap in range(0,1):
+            for lap in range(0,self.it):
                 array = self.shuffledSplitSS[:,4,lap,mode]
                 startpoint_index = np.argmax(np.multiply(array,array<1000))
                 startpoint = self.shuffledSplitSS[startpoint_index,:,lap,mode]                    
+                self.LinPoints = np.vstack((self.shuffledSplitSS[startpoint_index - local_tv_N  : startpoint_index,:,lap,mode]))
+                self.LinInput = np.vstack((self.shuffledSplituSS[startpoint_index - local_tv_N : startpoint_index - 1,:,lap,mode]))
+
+                #temporarily reset for estimateABC function
+                self.N = self.LinInput.shape[0]
+                
+                try:
+                    locAvec, locBvec, locCvec, indexUsed_list = self._EstimateABC()
+                    locA = locAvec[-1]
+                    locB = locBvec[-1]
+                    locC = locCvec[-1]
+                except ValueError:
+                    locA = A
+                    locB = B
+                    locC = np.zeros((6,1))
+                                
+                self.N = N
                 
                 lapConnectionFound = False
                 
                 # iterate through the first points of the laps in the next shuffled mode
-                for cont_lap in range(0,reachableSplitSS.shape[2]):
-                    array = reachableSplitSS[:,4,cont_lap,mode+1]
-                    endpoint_index = np.argmin(array)                   
-                    endpoint = reachableSplitSS[endpoint_index,:,cont_lap,mode+1]
-                    endcost = reachableSplitQfun[endpoint_index,cont_lap,mode+1]
+                for cont_lap in range(0,self.it):
+                    #print "cont_lap ", cont_lap
+                    array = reachableSplitSS[:,:,cont_lap,mode+1]
+                    try:
+                        BigZ_array = array[np.hstack(np.argwhere(array[:,1]<100))]
+                        BigQ_array = reachableSplitQfun[np.hstack(np.argwhere(array[:,1]<100)),cont_lap,mode+1]
+                    except ValueError:
+                        #print "Value Error"
+                        continue
                     
-                    status, ninput, cost = self.isReachable(startpoint,endpoint, endcost, A, B, Qslack)
+                    status, ninput, cost, slacknorm = self.isReachable(startpoint, BigZ_array, BigQ_array, locA, locB, locC, Qslack)
                     
-                    if status and cost < minCost:
+                    if status and slacknorm < minSlack:
                         #print 'Lap ', lap, ' connected to lap ', cont_lap
                         lapConnectionFound = True
                         modeConnectionFound = True
                         bestNextLap = cont_lap
                         
-                        minCost = cost
+                        minSlack = slacknorm
                         reachableSplitSS[:,:,lap,mode] = self.shuffledSplitSS[:,:,lap,mode]
 
                         inputMatrixSize = np.argwhere(self.shuffledSplituSS[:,0,lap,mode]<1000)                            
@@ -437,9 +482,9 @@ class AbstractControllerLMPC:
         
         return resetQvec
         
-    def isReachable(self, x0, xf, Qend, A, B, Qslack):
+    def isReachable(self, x0, BigZ, BigQ, A, B, C, Qslack):
         
-        M, q, F, b, G, d = self.BuildReachableQP(x0, xf, Qend, A, B, Qslack)
+        M, q, F, b, G, d = self.BuildReachableQP(x0, BigZ, BigQ, A, B, C, Qslack)
         sol = qp(matrix(M), matrix(q), matrix(F), matrix(b), matrix(G), matrix(d))
         if sol['status'] == 'optimal':
             status = True
@@ -449,32 +494,35 @@ class AbstractControllerLMPC:
         
         # need to return: status, input, optimization cost
         ninput = [Solution[-3], Solution[-2]]
-        
+        slack_variable = Solution[-9:-4]
+        slacknorm = np.linalg.norm(slack_variable)
         # extract cost associated with solution?
         cost = sol['primal objective']
         
-        return status, ninput, cost
+        return status, ninput, cost, slacknorm
     
-    def BuildReachableQP(self, x0, xf, Qend, A, B, Qslack):
+    def BuildReachableQP(self, x0, BigZ, BigQ, A, B, C, Qslack):
         num_x = A.shape[0]
         num_u = B.shape[1]
-        size_z = 3*num_x + num_u + 1
+        num_lam = BigQ.shape[0]
+        size_z = 3*num_x + num_lam + num_u + 1        
         
-        max_slack_value = 0.5 #should be much smaller!!!!!
+        #max_slack_value = 0.05 
         
         # Cost matrices M, q: 
         #x0, xf
         M1 = 0*np.eye(A.shape[0])
         #xf
         M2 = 0*np.eye(A.shape[0])
-        #M3 = Qslack
+        M3 = 0*np.eye(num_lam)
+        #M4 = Qslack
         #u and xc
-        M4 = np.zeros((3,3))
+        M5 = np.zeros((num_u+1,num_u+1))
         # append
-        M = linalg.block_diag(M1, M2, Qslack, M4)
+        M = linalg.block_diag(M1, M2, M3, 200*Qslack, M5)
         
         q = np.zeros((size_z,1))
-        q[-1] = 10
+        q[-1] = 2
         
         # Inequality constraints (on input and slack variable) F, b: 
         Fu = np.array([[1., 0.],
@@ -485,24 +533,42 @@ class AbstractControllerLMPC:
                    [0.5],  # Max Steering
                    [1.],  # Max Acceleration
                    [1.]])    
-        Fs = np.vstack((np.eye(num_x),-np.eye(num_x)))
-        bs = max_slack_value*np.ones((2*num_x,1))       
-        F1 = np.hstack((np.zeros((4,3*A.shape[0])),Fu,np.zeros((4,1))))
-        F2 = np.hstack((np.zeros((12,12)),Fs,np.zeros((12,3))))
-        F = np.vstack((F1,F2))
-        b = np.vstack((bu,bs))
+        F1 = np.hstack((np.zeros((4,3*num_x+num_lam)),Fu,np.zeros((4,1))))
+        F2 = np.hstack((np.zeros((num_lam, 2*num_x)), -np.eye(num_lam), np.zeros((num_lam, num_x + num_u + 1)) ))
+        bs = np.zeros((num_lam,1))
+        F = np.vstack((F1, F2))
+        b = np.vstack((bu, bs))
         
-        # Equality constraints G, d:     
-        xvec = np.concatenate((x0,xf),axis=0)
-        d = np.vstack((xvec[:,None],np.zeros((A.shape[0],1)),[[Qend]]))
-        G1 = np.hstack((np.eye(6),np.zeros((A.shape[0],size_z-A.shape[0]))))
-        G2 = np.hstack((np.zeros((A.shape[0],A.shape[0])), np.eye(A.shape[0]), np.eye(A.shape[0]), np.zeros((A.shape[0],B.shape[1]+1))))
-        G3 = np.hstack(( -A, np.eye(6), np.zeros((num_x, num_x)), -B, np.zeros((num_x,1)) ))
-        G4 = np.hstack(( np.zeros((1, size_z-1)), [[1]] ))
-        G = np.vstack((G1,G2,G3,G4))     
+        # Equality constraints G, d:
+        #print C.shape
+        #print np.transpose(x0).shape
+        #print np.zeros((num_x,1)).shape
+        d = np.vstack((C, np.transpose(x0).reshape((num_x,1)), np.zeros((num_x,1)), [[0]], [[1]]))
+        
+        G1 = np.hstack(( -A, np.eye(6), np.zeros((num_x, num_x + num_lam)), -B, np.zeros((num_x,1)) ))
+        G2 = np.hstack((np.eye(num_x), np.zeros((num_x, size_z - num_x)) ))
+        G3 = np.hstack(( np.zeros((num_x, num_x)), np.eye(num_x), -np.transpose(BigZ), np.eye(num_x), np.zeros((num_x, num_u+1)) ))       
+        G4 = np.hstack(( np.zeros((1,2*num_x)), -BigQ.reshape((1,num_lam)), np.zeros((1,num_x + num_u)), [[1]]))        
+        G5 = np.hstack(( np.zeros((1,2*num_x)), np.ones((1,num_lam)), np.zeros((1, num_x + num_u + 1)) ))
+        
+        G = np.vstack((G1,G2,G3,G4,G5))     
         
         return M, q, F, b, G, d
         
+    def selectBestTrajectory(self):
+        SS = self.reachableSS
+        uSS = self.reachableuSS
+        Qfun = self.reachableQfun
+        
+        best_lap_candidates = np.argwhere(SS[0,4,:]<0.2)
+        best_Q_of_lap_candidates = np.argmin(Qfun[0,best_lap_candidates])
+        best_lap_index = int(best_lap_candidates[best_Q_of_lap_candidates])
+    
+        rSS = SS[:,:,best_lap_index]
+        ruSS = uSS[:,:,best_lap_index]
+        rQfun = Qfun[:,best_lap_index]
+        
+        return rSS, ruSS, rQfun
 
 class PWAControllerLMPC(AbstractControllerLMPC):
     """

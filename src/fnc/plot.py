@@ -105,6 +105,7 @@ def plotClosedLoopLMPC(LMPController, map):
     SS      = LMPController.SS
     uSS     = LMPController.uSS
 
+    # this plots the track
     TotNumberIt = LMPController.it
     Points = int(np.floor(10 * (map.PointAndTangent[-1, 3] + map.PointAndTangent[-1, 4])))
     Points1 = np.zeros((Points, 2))
@@ -121,6 +122,7 @@ def plotClosedLoopLMPC(LMPController, map):
     plt.plot(Points1[:, 0], Points1[:, 1], '-b')
     plt.plot(Points2[:, 0], Points2[:, 1], '-b')
 
+    # this plots the SS_glob
     for i in range(2, TotNumberIt):
         plt.plot(SS_glob[0:TimeSS[i], 4, i], SS_glob[0:TimeSS[i], 5, i], '-r')
 

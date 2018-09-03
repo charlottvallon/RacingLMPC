@@ -117,7 +117,10 @@ class Map():
 
         #NewLine = np.array([xf, yf, psif, PointAndTangent[-2, 3] + PointAndTangent[-2, 4], l, 0])
         #PointAndTangent[-1, :] = NewLine
-
+        
+        #PointAndTangent = PointAndTangent[(9,0,1,2,3,4,5,6,7,8),:]
+        #PointAndTangent[:,3] = np.cumsum(PointAndTangent[:,3])
+        
         self.spec = spec
         self.PointAndTangent = PointAndTangent
         self.TrackLength = PointAndTangent[-1, 3] + PointAndTangent[-1, 4]
@@ -133,7 +136,6 @@ class Map():
 
         # Compute the segment in which system is evolving
         PointAndTangent = self.PointAndTangent
-
         index = np.all([[s >= PointAndTangent[:, 3]], [s < PointAndTangent[:, 3] + PointAndTangent[:, 4]]], axis=0)
         i = int((np.where(np.squeeze(index))[0]))
 
@@ -141,8 +143,13 @@ class Map():
             # Extract the first final and initial point of the segment
             xf = PointAndTangent[i, 0]
             yf = PointAndTangent[i, 1]
-            xs = PointAndTangent[i - 1, 0]
-            ys = PointAndTangent[i - 1, 1]
+            if i==0:
+                xs = 0.0
+                ys = 0.0
+            else:
+                xs = PointAndTangent[i - 1, 0]
+                ys = PointAndTangent[i - 1, 1]
+                
             psi = PointAndTangent[i, 2]
 
             # Compute the segment length
@@ -154,17 +161,24 @@ class Map():
             y = (1 - reltaL / deltaL) * ys + reltaL / deltaL * yf + ey * np.sin(psi + np.pi / 2)
         else:
             r = 1 / PointAndTangent[i, 5]  # Extract curvature
-            ang = PointAndTangent[i - 1, 2]  # Extract angle of the tangent at the initial point (i-1)
+            if i == 0:
+                ang = 0.0
+            else:
+                ang = PointAndTangent[i - 1, 2]  # Extract angle of the tangent at the initial point (i-1)
+            
             # Compute the center of the arc
             if r >= 0:
                 direction = 1
             else:
                 direction = -1
-
-            CenterX = PointAndTangent[i - 1, 0] \
-                      + np.abs(r) * np.cos(ang + direction * np.pi / 2)  # x coordinate center of circle
-            CenterY = PointAndTangent[i - 1, 1] \
-                      + np.abs(r) * np.sin(ang + direction * np.pi / 2)  # y coordinate center of circle
+            if i==0:
+                CenterX = 0.0 + np.abs(r) * np.cos(ang + direction * np.pi / 2)  # x coordinate center of circle
+                CenterY = 0.0 + np.abs(r) * np.sin(ang + direction * np.pi / 2)  # y coordinate center of circle
+            else: 
+                CenterX = PointAndTangent[i - 1, 0] \
+                          + np.abs(r) * np.cos(ang + direction * np.pi / 2)  # x coordinate center of circle
+                CenterY = PointAndTangent[i - 1, 1] \
+                          + np.abs(r) * np.sin(ang + direction * np.pi / 2)  # y coordinate center of circle
 
             spanAng = (s - PointAndTangent[i, 3]) / (np.pi * np.abs(r)) * np.pi
 
