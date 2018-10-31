@@ -187,6 +187,31 @@ class AbstractControllerLMPC:
             self.LinInput  = self.uSS[1:self.N + 1, :, it]
 
         self.it = self.it + 1
+        
+    def addTrajectoryToSS(self, SafeSet,uSafeSet, qSafeSet, ClosedLoopData):
+        """update iteration index and construct SS, uSS and Qfun
+        Arguments:
+            ClosedLoopData: ClosedLoopData object
+        """
+        it = self.it
+            
+        end_it = ClosedLoopData.SimTime
+        self.TimeSS[it] = end_it
+        SafeSet[0:(end_it + 1), :, it] = ClosedLoopData.x[0:(end_it + 1), :]
+        #GlobalSafeSet[0:(end_it + 1), :, it] = ClosedLoopData.x_glob[0:(end_it + 1), :]
+        uSafeSet[0:end_it, :, it]      = ClosedLoopData.u[0:(end_it), :]
+        qSafeSet[0:(end_it + 1), it]  = ComputeCost(ClosedLoopData.x[0:(end_it + 1), :],
+                                                              ClosedLoopData.u[0:(end_it), :], self.track_map.TrackLength)
+        for i in np.arange(0, qSafeSet.shape[0]):
+            if qSafeSet[i, it] == 0:
+                qSafeSet[i, it] = qSafeSet[i - 1, it] - 1
+
+        if self.it == 0:
+            # TODO: made this more general
+            self.LinPoints = SafeSet[1:self.N + 2, :, it]
+            self.LinInput  = uSafeSet[1:self.N + 1, :, it]
+
+        self.it = self.it + 1
 
     def addPoint(self, x, u, i):
         """at iteration j add the current point to SS, uSS and Qfun of the previous iteration
@@ -372,14 +397,15 @@ class AbstractControllerLMPC:
             for lap in range(0,self.it):
                 array = self.shuffledSplitSS[:,4,lap,mode]
                 startpoint_index = np.argmax(np.multiply(array,array<1000))
-                startpoint = self.shuffledSplitSS[startpoint_index,:,lap,mode]                    
-                self.LinPoints = np.vstack((self.shuffledSplitSS[startpoint_index - local_tv_N  : startpoint_index,:,lap,mode]))
-                self.LinInput = np.vstack((self.shuffledSplituSS[startpoint_index - local_tv_N : startpoint_index - 1,:,lap,mode]))
-
-                #temporarily reset for estimateABC function
-                self.N = self.LinInput.shape[0]
+                startpoint = self.shuffledSplitSS[startpoint_index,:,lap,mode]   
                 
                 try:
+                    self.LinPoints = np.vstack((self.shuffledSplitSS[startpoint_index - local_tv_N  : startpoint_index,:,lap,mode]))
+                    self.LinInput = np.vstack((self.shuffledSplituSS[startpoint_index - local_tv_N : startpoint_index - 1,:,lap,mode]))
+                    #temporarily reset for estimateABC function
+                    self.N = self.LinInput.shape[0]
+                    
+                    
                     locAvec, locBvec, locCvec, indexUsed_list = self._EstimateABC()
                     locA = locAvec[-1]
                     locB = locBvec[-1]
@@ -681,8 +707,30 @@ class ControllerLMPC(AbstractControllerLMPC):
 
     def _getQP(self, x0):
         # Run System ID
+        A = np.array([[ 9.66986188e-01,  8.40031817e-02, -1.52758633e-02, 3.02222257e-02,  7.41213685e-05, -1.79188470e-02],
+                      [-1.70819841e-03, -2.80969448e-02,  7.98021057e-03, -2.71158860e-03, -4.05797719e-06,  3.87380046e-03],
+                      [-2.82696677e-02, -1.81939014e+00,  2.38112509e-01,-4.58330442e-02, -9.49417969e-05,  6.80457566e-02],
+                      [ 1.34474870e-02, -1.84415868e-01,  4.17324683e-02,1.07733934e+00,  5.57120133e-05,  1.49890698e-02],
+                      [ 9.76859874e-02, -2.35704565e-02,  2.41429308e-03,-4.68612085e-03,  9.99999205e-01, -2.09009762e-02],
+                      [ 7.04133161e-04, -1.73933509e-02,  6.01945948e-03,6.83918582e-02,  3.55771523e-06,  1.00026000e+00]])
+    
+        B = np.array([[ 2.62522372e-02,  9.94735231e-02],
+                      [ 2.56478316e-01,  3.71261813e-03],
+                      [ 2.46539680e+00,  5.84412973e-02],
+                      [ 1.75961692e-01,  1.60220732e-02],
+                      [ 1.51077144e-03,  4.14928905e-03],
+                      [ 2.29064500e-02, -1.32228500e-04]])
+        
+        
         startTimer = datetime.datetime.now()
-        Atv, Btv, Ctv, _ = self._EstimateABC()
+        try:
+            Atv, Btv, Ctv, _ = self._EstimateABC()
+        except ValueError:
+            # approximate with regular A
+            Atv = []; Btv = [];Ctv = []
+            C = np.zeros((A.shape[0],1))
+            for i in range(0, self.N):
+               Atv.append(A); Btv.append(B); Ctv.append(C)
         deltaTimer = datetime.datetime.now() - startTimer
         L, npG, npE = BuildMatEqConst_TV(self.Solver, Atv, Btv, Ctv)
         self.linearizationTime = deltaTimer

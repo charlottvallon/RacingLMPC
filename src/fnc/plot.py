@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 import matplotlib.patches as patches
+from matplotlib import gridspec
 
 import pdb
 
@@ -20,8 +21,8 @@ def plotMap(map):
     plt.plot(Points0[:, 0], Points0[:, 1], '--')
     plt.plot(Points1[:, 0], Points1[:, 1], '-b')
     plt.plot(Points2[:, 0], Points2[:, 1], '-b')
-    plt.ylim(-7.5, 7.5)
-    plt.xlim(-7.5,7.5)
+    #plt.ylim(-7.5, 7.5)
+    #plt.xlim(-7.5,7.5)
 
 
 def plotTrajectory(map, x, x_glob, u):
@@ -63,6 +64,121 @@ def plotTrajectory(map, x, x_glob, u):
     plt.subplot(717)
     plt.plot(x[0:-1, 4], u[:, 1], '-o')
     plt.ylabel('acc')
+    
+    
+def plotQprogression(LMPController, PIDController,dt,map,Index, directory):    
+    
+    #plt.subplot(311) 
+    plt.figure()
+    plt.plot(range(0,LMPController.it-2), LMPController.Qfun[0,2:]*dt,label='MBTL-initialized')
+    plt.plot(range(0,PIDController.it-2), PIDController.Qfun[0,2:]*dt,label='PID-initialized')
+    plt.legend()
+    plt.xlabel('Iteration (Lap)')
+    plt.ylabel('Total Iteration Cost')  
+    plt.autoscale(enable=True, axis='both')  
+    plt.savefig(directory+'/Qprogr-'+str(Index+1)+'.eps')
+    plt.show() 
+          
+    #plt.subplot(312) #LMPController
+    plt.figure()
+    SS_glob = LMPController.SS_glob
+    TimeSS  = LMPController.TimeSS
+    TotNumberIt = LMPController.it
+    Points = int(np.floor(10 * (map.PointAndTangent[-1, 3] + map.PointAndTangent[-1, 4])))
+    Points1 = np.zeros((Points, 2))
+    Points2 = np.zeros((Points, 2))
+    Points0 = np.zeros((Points, 2))
+    for i in range(0, int(Points)):
+        Points1[i, :] = map.getGlobalPosition(i * 0.1, map.width)
+        Points2[i, :] = map.getGlobalPosition(i * 0.1, -map.width)
+        Points0[i, :] = map.getGlobalPosition(i * 0.1, 0)
+    plt.plot(Points0[:, 0], Points0[:, 1], '--')
+    plt.plot(Points1[:, 0], Points1[:, 1], '-b')
+    plt.plot(Points2[:, 0], Points2[:, 1], '-b')
+    for i in range(2, TotNumberIt):
+        plt.plot(SS_glob[0:TimeSS[i], 4, i], SS_glob[0:TimeSS[i], 5, i], 'og')
+    plt.plot(SS_glob[0:TimeSS[TotNumberIt-1], 4, TotNumberIt-1], SS_glob[0:TimeSS[TotNumberIt-1], 5, TotNumberIt-1], 'og', label = 'MBTL-initialized')
+    plt.legend()
+    plt.autoscale(enable=True, axis='both')
+    plt.savefig(directory+'/LMPCtraj-'+str(Index+1)+'.eps')
+    plt.show()
+    
+    #plt.subplot(313)
+    plt.figure()
+    SS_glob = PIDController.SS_glob
+    TimeSS  = PIDController.TimeSS
+    TotNumberIt = PIDController.it
+    Points = int(np.floor(10 * (map.PointAndTangent[-1, 3] + map.PointAndTangent[-1, 4])))
+    Points1 = np.zeros((Points, 2))
+    Points2 = np.zeros((Points, 2))
+    Points0 = np.zeros((Points, 2))
+    for i in range(0, int(Points)):
+        Points1[i, :] = map.getGlobalPosition(i * 0.1, map.width)
+        Points2[i, :] = map.getGlobalPosition(i * 0.1, -map.width)
+        Points0[i, :] = map.getGlobalPosition(i * 0.1, 0)
+    plt.plot(Points0[:, 0], Points0[:, 1], '--')
+    plt.plot(Points1[:, 0], Points1[:, 1], '-b')
+    plt.plot(Points2[:, 0], Points2[:, 1], '-b')
+    for i in range(2, TotNumberIt-1):
+        plt.plot(SS_glob[0:TimeSS[i], 4, i], SS_glob[0:TimeSS[i], 5, i], 'sr')
+    plt.plot(SS_glob[0:TimeSS[TotNumberIt-1], 4, TotNumberIt-1], SS_glob[0:TimeSS[TotNumberIt-1], 5, TotNumberIt-1], 'sr', label = 'PID-initialized')
+    plt.legend()
+    plt.autoscale(enable=True, axis='both')    
+    plt.savefig(directory+'/PIDtraj-'+str(Index+1)+'.eps')
+    plt.show()
+    
+    
+def plotTrajectoriesComparison(Map, SS, PIDx_glob, Index, directory):
+    plt.figure()
+    
+    # plot RSS
+    counter = 0
+    SSPoints = np.zeros([SS.shape[0],2])
+    for state in range(0,SS.shape[0]):
+        if SS[state,0]<1000:
+            #print(counter)
+            try:
+                SSPoints[counter,:] = Map.getGlobalPosition(SS[state,4], SS[state,5])
+                counter += 1
+            except AttributeError:
+                print("something about the nonetype again")
+                continue                
+    plt.plot(SSPoints[:,0],SSPoints[:,1],'og',label='MBTL-initialized')
+    
+    # plot PID-SS
+    plt.plot(PIDx_glob[1:-1, 4], PIDx_glob[1:-1, 5], 'sr',label='PID-initialized')
+    
+    # plot the track
+    Points = int(np.floor(10 * (Map.PointAndTangent[-1, 3] + Map.PointAndTangent[-1, 4])))
+    Points1 = np.zeros((Points, 2))
+    Points2 = np.zeros((Points, 2))
+    Points0 = np.zeros((Points, 2))
+    for i in range(0, int(Points)):
+        try:
+            Points1[i, :] = Map.getGlobalPosition(i * 0.1, Map.width)
+            Points2[i, :] = Map.getGlobalPosition(i * 0.1, -Map.width)
+            Points0[i, :] = Map.getGlobalPosition(i * 0.1, 0)
+        except AttributeError:
+            continue
+
+    #plt.plot(Map.PointAndTangent[:, 0], Map.PointAndTangent[:, 1], 'o')
+    plt.plot(Points0[:, 0], Points0[:, 1], '--')
+    plt.plot(Points1[:, 0], Points1[:, 1], '-b')
+    plt.plot(Points2[:, 0], Points2[:, 1], '-b')
+    
+    if Index == 100:
+        plt.title('Initial safe sets for two initialization methods')
+        plt.legend()
+    
+        plt.savefig(directory+'/'+'ISS-'+str(Index+1)+'.eps')
+        plt.show()
+        
+    else:
+        plt.title('Initial safe sets after '+str(Index+1)+' track recombinations.')
+        plt.legend()
+    
+        plt.savefig(directory+'/'+'ISS-'+str(Index+1)+'.eps')
+        plt.show()
     
     
 def plotSafeSet(SS,Map):
