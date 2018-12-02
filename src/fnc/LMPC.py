@@ -8,7 +8,7 @@ from cvxopt.solvers import qp
 import datetime
 from functools import partial
 from pathos.multiprocessing import ProcessingPool as Pool
-from Utilities import Curvature
+from Utilities import Curvature, nStepRegression
 from numpy import hstack, inf, ones
 from scipy.sparse import vstack
 from numpy import eye
@@ -785,6 +785,157 @@ class ControllerLMPC(AbstractControllerLMPC):
         return Atv, Btv, Ctv, indexUsed_list
 
 
+class ControllerLTI_LMPC(AbstractControllerLMPC):
+    """Create the LMPC
+    Attributes:
+        solve: given x0 computes the control action
+        addTrajectory: given a ClosedLoopData object adds the trajectory to SS, Qfun, uSS and updates the iteration index
+        addPoint: this function allows to add the closed loop data at iteration j to the SS of iteration (j-1)
+        update: this function can be used to set SS, Qfun, uSS and the iteration index.
+    """
+    def __init__(self, numSS_Points, numSS_it, N, Qslack, Q, R, dR, 
+                 n, d, shift, dt, track_map, Laps, TimeLMPC, Solver):
+        # Build matrices for inequality constraints
+        self.F, self.b = LMPC_BuildMatIneqConst(N, n, numSS_Points, Solver)
+        super(ControllerLTI_LMPC, self).__init__(numSS_Points, numSS_it, N, Qslack, Q, R, dR, 
+                                              n, d, shift, dt, track_map, Laps, TimeLMPC, Solver)
+        
+        self.A = np.array([[ 9.64629458e-01,  4.60237683e-01, -5.25408848e-02, 9.24358247e-04,  5.10264151e-05,  6.86962525e-03],
+                           [-1.77378424e-03, -2.12240216e-01,  2.68469608e-02, -3.19560445e-04,  9.70106541e-06,  2.86591934e-03],
+                           [-3.07763289e-02, -4.14081475e+00,  4.74387233e-01, -8.57617964e-03,  1.97579640e-04,  2.69366065e-02],
+                           [ 2.08412726e-02, -7.59644071e-01,  1.01310692e-01, 1.08305080e+00, -1.87165855e-05,  5.04038912e-02],
+                           [ 9.57579461e-02, -7.64598742e-03,  8.30621775e-04, -7.61048122e-03,  1.00000160e+00, -1.51358758e-02],
+                           [ 9.35746415e-04, -1.04358461e-02,  5.34305392e-03, 6.87529950e-02, -2.19782880e-06,  1.00148367e+00]])
+    
+        self.B = np.array([[ 1.88757665e-02,  1.03291797e-01],
+                           [ 2.59402708e-01,  1.83342143e-03],
+                           [ 2.50156745e+00,  3.76333055e-02],
+                           [ 1.82673285e-01, -7.43195820e-03],
+                           [ 5.79452975e-04,  6.05520413e-03],
+                           [ 2.34122782e-02, -9.64502589e-04]])
+
+    def _getQP(self, x0):
+                
+        startTimer = datetime.datetime.now()
+        
+        Atv = []; Btv = [];Ctv = []
+        C = np.zeros((self.A.shape[0],1))
+        for i in range(0, self.N):
+            Atv.append(self.A); Btv.append(self.B); Ctv.append(C)
+        deltaTimer = datetime.datetime.now() - startTimer
+        L, npG, npE = BuildMatEqConst_TV(self.Solver, Atv, Btv, Ctv)
+        self.linearizationTime = deltaTimer
+
+        # Build Terminal cost and Constraint
+        G, E = LMPC_TermConstr(self.Solver, self.N, self.n, self.d, npG, npE, self.SS_PointSelectedTot)
+        M, q = LMPC_BuildMatCost(self.Solver, self.N, self.Qfun_SelectedTot, self.numSS_Points, self.Qslack, self.Q, self.R, self.dR, self.OldInput)
+        return L, G, E, M, q, self.F, self.b
+    
+class ControllerLTI_LMPC_NStep(AbstractControllerLMPC):
+    """Create the LMPC
+    Attributes:
+        solve: given x0 computes the control action
+        addTrajectory: given a ClosedLoopData object adds the trajectory to SS, Qfun, uSS and updates the iteration index
+        addPoint: this function allows to add the closed loop data at iteration j to the SS of iteration (j-1)
+        update: this function can be used to set SS, Qfun, uSS and the iteration index.
+    """
+    def __init__(self, numSS_Points, numSS_it, N, Qslack, Q, R, dR, 
+                 n, d, shift, dt, track_map, Laps, TimeLMPC, Solver):
+        # Build matrices for inequality constraints
+        self.F, self.b = LMPC_BuildMatIneqConst(N, n, numSS_Points, Solver)
+        super(ControllerLTI_LMPC_NStep, self).__init__(numSS_Points, numSS_it, N, Qslack, Q, R, dR, 
+                                              n, d, shift, dt, track_map, Laps, TimeLMPC, Solver)
+        
+        self.A = np.array([[ 9.64629458e-01,  4.60237683e-01, -5.25408848e-02, 9.24358247e-04,  5.10264151e-05,  6.86962525e-03],
+                           [-1.77378424e-03, -2.12240216e-01,  2.68469608e-02, -3.19560445e-04,  9.70106541e-06,  2.86591934e-03],
+                           [-3.07763289e-02, -4.14081475e+00,  4.74387233e-01, -8.57617964e-03,  1.97579640e-04,  2.69366065e-02],
+                           [ 2.08412726e-02, -7.59644071e-01,  1.01310692e-01, 1.08305080e+00, -1.87165855e-05,  5.04038912e-02],
+                           [ 9.57579461e-02, -7.64598742e-03,  8.30621775e-04, -7.61048122e-03,  1.00000160e+00, -1.51358758e-02],
+                           [ 9.35746415e-04, -1.04358461e-02,  5.34305392e-03, 6.87529950e-02, -2.19782880e-06,  1.00148367e+00]])
+    
+        self.B = np.array([[ 1.88757665e-02,  1.03291797e-01],
+                           [ 2.59402708e-01,  1.83342143e-03],
+                           [ 2.50156745e+00,  3.76333055e-02],
+                           [ 1.82673285e-01, -7.43195820e-03],
+                           [ 5.79452975e-04,  6.05520413e-03],
+                           [ 2.34122782e-02, -9.64502589e-04]])
+
+    def _getQP(self, x0):
+                
+        startTimer = datetime.datetime.now()        
+        
+#        Atv = []; Btv = [];Ctv = []
+#        C = np.zeros((self.A.shape[0],1))
+#        for i in range(0, self.N):
+#            Atv.append(self.A); Btv.append(self.B); Ctv.append(C)
+            
+        deltaTimer = datetime.datetime.now() - startTimer
+        
+        # do the n-step regression here to get the Theta values?
+        #Theta = self.nStepTheta
+        L, npG, npE = self._BuildMatEqConst_Nstep(self.Solver, self.Theta, self.N, self.n, self.d)
+        
+        self.linearizationTime = deltaTimer
+
+        # Build Terminal cost and Constraint
+        G, E = LMPC_TermConstr(self.Solver, self.N, self.n, self.d, npG, npE, self.SS_PointSelectedTot)
+        M, q = LMPC_BuildMatCost(self.Solver, self.N, self.Qfun_SelectedTot, self.numSS_Points, self.Qslack, self.Q, self.R, self.dR, self.OldInput)
+        return L, G, E, M, q, self.F, self.b
+    
+    def _getTheta(self, x, u, N, lamb):
+        
+        Theta, nStep_Error = nStepRegression(x, u, N, lamb)
+        self.Theta = Theta
+
+    def _BuildMatEqConst_Nstep(self, Solver, Theta, N, n, d):
+    
+        # dimensions of these matrices stay the same
+        Gx = np.eye(n * (N + 1))
+        Gu = np.zeros((n * (N + 1), d * (N)))
+    
+        E = np.zeros((n * (N + 1), n))
+        E[np.arange(n)] = np.eye(n)
+    
+        # L stays all zeros except end
+        L = np.zeros((n * (N + 1) + n + 1, 1)) # n+1 for the terminal constraint
+        L[-1] = 1 # Summmation of lambda must add up to 1
+        
+        # Theta_x(n) always acts on x0, but Theta_x(n) changes with n
+        ind2x = np.arange(n)
+        thetaXind = np.array(xrange(1))
+        thetaUind = np.array(xrange(1))
+   
+        for i in range(0, N):
+            # starts by defining equation for x1=Theta1[x0,u0]. x2 = Theta2[x0,u0,u1], etc...
+            
+            # select Theta indices
+            if i==0:                
+                thetaXind = thetaUind[-1] + np.arange(n)
+                
+            else:
+                thetaXind = thetaUind[-1] + 1 + np.arange(n)
+                
+            thetaUind = thetaXind[-1] + 1 + np.arange((i+1)*d)
+            
+            # vertical index range is 6 (state length, stays the same)
+            ind1 = n + i * n + np.arange(n)
+            Gx[np.ix_(ind1, ind2x)] = -Theta[:,thetaXind]            
+            
+            # UPDATE WHICH INDICES IN GU CORRESPOND TO THE THETA HERE
+            ind2u = np.arange((i+1)*d)
+            Gu[np.ix_(ind1, ind2u)] = -Theta[:, thetaUind]
+    
+        G = np.hstack((Gx, Gu))
+    
+    
+        if Solver == "CVX":
+            L_sparse = spmatrix(L[np.nonzero(L)], np.nonzero(L)[0].astype(int), np.nonzero(L)[1].astype(int), L.shape)
+            L_return = L_sparse
+        else:
+            L_return = L
+        
+        return L_return,G,E
+    
 
 # ======================================================================================================================
 # ======================================================================================================================
@@ -1022,6 +1173,7 @@ def BuildMatEqConst_TV(Solver, A, B, C):
     # the predicte input u_{k|t} \forall k = t, \ldots, t+N over the horizon
     N = len(A)
     n, d = B[0].shape
+    #n,d = 6,2
     Gx = np.eye(n * (N + 1))
     Gu = np.zeros((n * (N + 1), d * (N)))
 
